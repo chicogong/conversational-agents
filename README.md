@@ -2,9 +2,9 @@
 
 一个基于WebSocket的实时语音对话系统，集成了语音识别、大语言模型和语音合成功能。
 
-![GitHub stars](https://img.shields.io/github/stars/yourusername/your-repo?style=social)
-![GitHub forks](https://img.shields.io/github/forks/yourusername/your-repo?style=social)
-![License](https://img.shields.io/github/license/yourusername/your-repo)
+![GitHub stars](https://img.shields.io/github/stars/chicogong/conversational-agents?style=social)
+![GitHub forks](https://img.shields.io/github/forks/chicogong/conversational-agents?style=social)
+![License](https://img.shields.io/github/license/chicogong/conversational-agents)
 
 ## ✨ 功能特点
 
@@ -36,8 +36,8 @@
 
 1. 克隆仓库：
 ```bash
-git clone https://github.com/yourusername/your-repo.git
-cd your-repo
+git clone https://github.com/chicogong/conversational-agens.git
+cd conversational-agent
 ```
 
 2. 安装依赖：
@@ -112,10 +112,10 @@ npm start
 
 ### 性能指标
 
-- ASR延迟：< 500ms
-- LLM首token延迟：< 1000ms
-- TTS首帧延迟：< 500ms
-- 端到端延迟：< 2000ms
+- ASR延迟：< 300ms
+- LLM首token延迟：< 300ms
+- TTS首帧延迟：< 300ms
+- 端到端延迟：< 1000ms
 
 ## 🚀 扩展功能
 
@@ -142,6 +142,9 @@ npm start
 - [ ] 支持多语言切换
 - [ ] 优化语音识别准确率
 - [ ] 添加错误重试机制
+- [ ] 接入更多LLM提供商
+- [ ] 接入更多TTS（Minimax等）提供商
+- [ ] 增加协议的扩展性
 
 ### 中期计划
 - [ ] 集成更多LLM提供商
@@ -173,15 +176,14 @@ npm start
 
 - [Azure Speech Service](https://azure.microsoft.com/services/cognitive-services/speech-services/)
 - [OpenAI](https://openai.com/)
-- 所有贡献者
 
 ## 📞 联系方式
 
-- 项目维护者：[chicogong](https://github.com/yourusername)
-- 邮箱：chicogong@example.com
+- 项目维护者：[chicogong](https://github.com/chicogong)
+- 邮箱：chicogong@tencent.com
 
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/yourusername">Your Name</a></sub>
+  <sub>Built with ❤️ by <a href="https://github.com/chicogong">chicogong</a></sub>
 </div> 
