@@ -210,6 +210,9 @@
     </div>
 
     <script>
+        /**
+         * 全局变量定义
+         */
         let websocket;
         let audioContext;
         const startButton = document.getElementById('startButton');
@@ -223,7 +226,11 @@
         let currentSource = null;
         let isTyping = false;
 
-        // 添加消息到聊天界面
+        /**
+         * 添加消息到聊天界面
+         * @param {string} text - 消息文本
+         * @param {boolean} isUser - 是否为用户消息
+         */
         function addMessage(text, isUser = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
@@ -239,7 +246,9 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        // 显示输入指示器
+        /**
+         * 显示输入指示器
+         */
         function showTypingIndicator() {
             if (isTyping) return;
             
@@ -257,7 +266,9 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        // 隐藏输入指示器
+        /**
+         * 隐藏输入指示器
+         */
         function hideTypingIndicator() {
             isTyping = false;
             const indicator = document.getElementById('typingIndicator');
@@ -266,12 +277,14 @@
             }
         }
 
-        // 初始化WebSocket连接
+        /**
+         * 初始化WebSocket连接
+         */
         function initWebSocket() {
             websocket = new WebSocket('ws://' + window.location.hostname + ':8080');
             
             websocket.onopen = () => {
-                console.log('WebSocket连接已建立');
+                console.log('[WebSocket] 连接已建立');
                 status.textContent = '已连接到服务器';
             };
 
@@ -294,17 +307,19 @@
             };
 
             websocket.onclose = () => {
-                console.log('WebSocket连接已关闭');
+                console.log('[WebSocket] 连接已关闭');
                 status.textContent = '与服务器断开连接';
             };
 
             websocket.onerror = (error) => {
-                console.error('WebSocket错误:', error);
+                console.error('[错误] WebSocket错误:', error);
                 status.textContent = 'WebSocket错误';
             };
         }
 
-        // 处理中断
+        /**
+         * 处理中断
+         */
         function handleInterruption() {
             if (currentSource) {
                 currentSource.stop();
@@ -316,7 +331,10 @@
             hideTypingIndicator();
         }
 
-        // 添加音频到队列
+        /**
+         * 添加音频到队列
+         * @param {Array} audioData - 音频数据
+         */
         function addToAudioQueue(audioData) {
             audioQueue.push(audioData);
             if (!isPlaying) {
@@ -324,7 +342,9 @@
             }
         }
 
-        // 播放队列中的下一个音频
+        /**
+         * 播放队列中的下一个音频
+         */
         async function playNextAudio() {
             if (audioQueue.length === 0) {
                 isPlaying = false;
@@ -354,13 +374,15 @@
                 
                 source.start(0);
             } catch (error) {
-                console.error('音频播放错误:', error);
+                console.error('[错误] 音频播放错误:', error);
                 currentSource = null;
                 playNextAudio(); // 继续播放下一个
             }
         }
 
-        // 开始录音
+        /**
+         * 开始录音
+         */
         async function startRecording() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -397,12 +419,14 @@
                 status.innerHTML = '<span class="recording-indicator"></span>正在收音...';
                 showTypingIndicator();
             } catch (error) {
-                console.error('录音错误:', error);
+                console.error('[错误] 录音错误:', error);
                 status.textContent = '无法访问麦克风: ' + error.message;
             }
         }
 
-        // 停止录音
+        /**
+         * 停止录音
+         */
         function stopRecording() {
             if (audioContext) {
                 audioContext.close();
@@ -425,4 +449,4 @@
         window.addEventListener('load', initWebSocket);
     </script>
 </body>
-</html> 
+</html>
