@@ -111,6 +111,10 @@
         const subtitle = document.getElementById('subtitle');
         const llmResponse = document.getElementById('llm-response');
         let currentLLMResponse = '';
+        
+        // 音频播放队列
+        const audioQueue = [];
+        let isPlaying = false;
 
         // 初始化WebSocket连接
         function initWebSocket() {
@@ -122,33 +126,27 @@
             };
 
             websocket.onmessage = (event) => {
-                const result = JSON.parse(event.data);
-                if (result.transcription) {
-                    // 创建新的字幕元素
-                    const newSubtitle = document.createElement('div');
-                    newSubtitle.className = 'subtitle';
-                    newSubtitle.textContent = result.transcription;
-                    
-                    // 添加到字幕容器
-                    subtitle.appendChild(newSubtitle);
-                    
-                    // 自动滚动到底部
-                    subtitle.scrollTop = subtitle.scrollHeight;
-                }
+                const data = JSON.parse(event.data);
                 
-                if (result.llmResponse) {
-                    currentLLMResponse += result.llmResponse;
+                if (data.transcription) {
+                    currentText = data.transcription;
+                    subtitle.textContent = currentText;
+                } else if (data.llmResponse) {
+                    currentLLMResponse += data.llmResponse;
                     llmResponse.textContent = currentLLMResponse;
-                    llmResponse.scrollTop = llmResponse.scrollHeight;
-                }
-                
-                if (result.error) {
+                } else if (data.audioData) {
+                    // 将音频数据添加到队列
+                    addToAudioQueue(data.audioData);
+                } else if (data.error) {
                     const errorElement = document.createElement('div');
                     errorElement.className = 'llm-response';
                     errorElement.style.color = 'red';
-                    errorElement.textContent = result.error;
+                    errorElement.textContent = data.error;
                     llmResponse.appendChild(errorElement);
                 }
+                
+                // 滚动到底部
+                subtitle.scrollTop = subtitle.scrollHeight;
             };
 
             websocket.onclose = () => {
@@ -160,6 +158,45 @@
                 console.error('WebSocket错误:', error);
                 status.textContent = 'WebSocket错误';
             };
+        }
+
+        // 添加音频到队列
+        function addToAudioQueue(audioData) {
+            audioQueue.push(audioData);
+            if (!isPlaying) {
+                playNextAudio();
+            }
+        }
+
+        // 播放队列中的下一个音频
+        async function playNextAudio() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                return;
+            }
+
+            isPlaying = true;
+            const audioData = audioQueue.shift();
+            
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                
+                const buffer = await audioContext.decodeAudioData(new Uint8Array(audioData).buffer);
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioContext.destination);
+                
+                source.onended = () => {
+                    playNextAudio();
+                };
+                
+                source.start(0);
+            } catch (error) {
+                console.error('音频播放错误:', error);
+                playNextAudio(); // 继续播放下一个
+            }
         }
 
         // 开始录音
@@ -214,12 +251,16 @@
         function stopRecording() {
             if (audioContext) {
                 audioContext.close();
+                audioContext = null;
             }
             startButton.disabled = false;
             stopButton.disabled = true;
             status.textContent = '录音已停止';
             currentLLMResponse = '';
             llmResponse.textContent = '';
+            // 清空音频队列
+            audioQueue.length = 0;
+            isPlaying = false;
         }
 
         // 事件监听

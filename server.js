@@ -24,6 +24,14 @@ speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTi
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500");
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true");
 
+// Azure TTS 配置
+const ttsConfig = sdk.SpeechConfig.fromSubscription(
+    process.env.AZURE_SPEECH_KEY,
+    process.env.AZURE_SPEECH_REGION
+);
+ttsConfig.speechSynthesisLanguage = 'zh-CN';
+ttsConfig.speechSynthesisVoiceName = 'zh-CN-XiaoxiaoNeural'; // 使用晓晓语音
+
 // OpenAI配置
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -44,18 +52,92 @@ async function callLLM(text, ws) {
             stream: true
         });
 
+        let fullResponse = '';
+        let currentSentence = '';
+        
         for await (const chunk of stream) {
             const content = chunk.choices[0]?.delta?.content;
             if (content) {
-                ws.send(JSON.stringify({
-                    llmResponse: content
-                }));
+                fullResponse += content;
+                currentSentence += content;
+                
+                // 检查是否遇到句子结束的标点符号
+                if (/[！。？：，]/.test(content)) {
+                    // 发送当前句子到前端显示
+                    ws.send(JSON.stringify({
+                        llmResponse: currentSentence
+                    }));
+                    
+                    // 对当前句子进行TTS
+                    await textToSpeech(currentSentence, ws);
+                    
+                    // 清空当前句子
+                    currentSentence = '';
+                }
             }
+        }
+        
+        // 处理最后一个不完整的句子
+        if (currentSentence.trim()) {
+            ws.send(JSON.stringify({
+                llmResponse: currentSentence
+            }));
+            await textToSpeech(currentSentence, ws);
         }
     } catch (error) {
         console.error('调用LLM出错:', error);
         ws.send(JSON.stringify({
             error: '调用大模型时出错'
+        }));
+    }
+}
+
+// 文本转语音
+async function textToSpeech(text, ws) {
+    try {
+        console.log('开始语音合成，文本:', text);
+        
+        // 创建新的语音合成器
+        const synthesizer = new sdk.SpeechSynthesizer(ttsConfig);
+        
+        // 使用 speakTextAsync 方法
+        const result = await new Promise((resolve, reject) => {
+            synthesizer.speakTextAsync(
+                text,
+                result => {
+                    console.log('语音合成结果:', result);
+                    resolve(result);
+                },
+                error => {
+                    console.error('语音合成错误:', error);
+                    reject(error);
+                }
+            );
+        });
+
+        if (result && result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+            console.log('语音合成成功，音频数据大小:', result.audioData ? result.audioData.length : 0);
+            
+            // 将音频数据转换为可序列化的格式
+            const audioData = Array.from(new Uint8Array(result.audioData));
+            ws.send(JSON.stringify({
+                audioData: audioData
+            }));
+        } else {
+            const errorDetails = result ? 
+                `原因: ${result.reason}, 错误: ${result.errorDetails}` : 
+                '未知错误';
+            console.error('语音合成失败:', errorDetails);
+            ws.send(JSON.stringify({
+                error: `语音合成失败: ${errorDetails}`
+            }));
+        }
+        
+        synthesizer.close();
+    } catch (error) {
+        console.error('TTS错误:', error);
+        ws.send(JSON.stringify({
+            error: `语音合成出错: ${error.message}`
         }));
     }
 }
