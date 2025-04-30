@@ -2,9 +2,22 @@
 
 一个基于WebSocket的实时语音对话系统，集成了语音识别、大语言模型和语音合成功能。
 
-![GitHub stars](https://img.shields.io/github/stars/chicogong/conversational-agents?style=social)
-![GitHub forks](https://img.shields.io/github/forks/chicogong/conversational-agents?style=social)
-![License](https://img.shields.io/github/license/chicogong/conversational-agents)
+<div align="center">
+
+[![AI Agent](https://img.shields.io/badge/AI_Agent-2.0.0-blue.svg)](https://cloud.tencent.com/document/product/647/110584)
+[![Conversational AI](https://img.shields.io/badge/Conversational_AI-2.0.0-blue.svg)](https://cloud.tencent.com/product/trtc)
+[![Node.js](https://img.shields.io/badge/Node.js-18.0.0-green.svg)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+</div>
+
+<div align="center">
+
+[![GitHub Stars](https://img.shields.io/github/stars/chicogong/conversational-agents)](https://github.com/chicogong/conversational-agents/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/chicogong/conversational-agents)](https://github.com/chicogong/conversational-agents/network/members)
+
+</div>
 
 ## ✨ 功能特点
 
