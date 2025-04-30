@@ -1,26 +1,43 @@
-# 实时语音识别应用
+# 智能语音助手
 
-这是一个使用WebSocket和Azure语音服务的实时语音识别Web应用。
+一个基于WebSocket的实时语音对话系统，集成了语音识别、大语言模型和语音合成功能。
 
-## 功能特点
+![GitHub stars](https://img.shields.io/github/stars/yourusername/your-repo?style=social)
+![GitHub forks](https://img.shields.io/github/forks/yourusername/your-repo?style=social)
+![License](https://img.shields.io/github/license/yourusername/your-repo)
 
-- 实时音频采集
-- WebSocket实时传输
-- Azure语音服务识别
-- 实时文字显示
+## ✨ 功能特点
 
-## 前置要求
+- 🎤 实时语音识别：支持连续语音识别，自动断句
+- 🤖 智能对话：集成大语言模型，提供智能对话能力
+- 🔊 语音合成：将AI回复转换为自然语音
+- 🚀 实时交互：支持打断和实时响应
+- 🎨 美观界面：现代化的聊天界面设计
+- 📱 响应式设计：适配不同设备屏幕
 
-- Node.js (v12.0.0 或更高版本)
-- Azure语音服务账号
-- 现代浏览器（支持WebSocket和MediaRecorder API）
+## 🛠️ 技术栈
 
-## 安装步骤
+- 前端：HTML5, CSS3, JavaScript, WebSocket, Web Audio API
+- 后端：Node.js, Express
+- 语音识别：Azure Speech Service
+- 大语言模型：OpenAI API
+- 语音合成：Azure Text-to-Speech
+
+## 📦 安装与配置
+
+### 环境要求
+
+- Node.js 16+
+- npm 或 yarn
+- Azure Speech Service 订阅
+- OpenAI API 密钥
+
+### 安装步骤
 
 1. 克隆仓库：
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/yourusername/your-repo.git
+cd your-repo
 ```
 
 2. 安装依赖：
@@ -29,40 +46,142 @@ npm install
 ```
 
 3. 配置环境变量：
-   - 复制 `.env.example` 文件为 `.env`
-   - 在 `.env` 文件中填入你的Azure语音服务凭证：
-```
-AZURE_SPEECH_KEY=your_azure_speech_key_here
-AZURE_SPEECH_REGION=your_azure_region_here
+创建 `.env` 文件并添加以下配置：
+```env
+# Azure Speech Service
+AZURE_SPEECH_KEY=your_azure_speech_key
+AZURE_SPEECH_REGION=your_azure_region
+
+# OpenAI
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_BASE_URL=your_openai_base_url
+OPENAI_MODEL=gpt-3.5-turbo
 ```
 
-## 运行应用
-
-1. 启动服务器：
+4. 启动服务：
 ```bash
 npm start
 ```
 
-2. 打开浏览器访问：
+5. 访问应用：
+打开浏览器访问 `http://localhost:8080`
+
+## 🔌 协议设计
+
+### WebSocket 消息格式
+
+#### 客户端到服务器
+```json
+{
+  "type": "audio",
+  "data": "Base64编码的音频数据"
+}
 ```
-http://localhost:8080
+
+#### 服务器到客户端
+```json
+// 语音识别结果
+{
+  "type": "transcription",
+  "text": "识别的文本内容"
+}
+
+// LLM响应
+{
+  "type": "llmResponse",
+  "text": "AI回复内容"
+}
+
+// TTS音频数据
+{
+  "type": "audioData",
+  "data": "Base64编码的音频数据"
+}
+
+// 中断信号
+{
+  "type": "interrupt"
+}
+
+// 错误信息
+{
+  "type": "error",
+  "message": "错误描述"
+}
 ```
 
-## 使用说明
+### 性能指标
 
-1. 点击"开始录音"按钮开始录制音频
-2. 说话时，语音将被实时识别并显示在页面上
-3. 点击"停止录音"按钮结束录制
+- ASR延迟：< 500ms
+- LLM首token延迟：< 1000ms
+- TTS首帧延迟：< 500ms
+- 端到端延迟：< 2000ms
 
-## 注意事项
+## 🚀 扩展功能
 
-- 确保麦克风权限已启用
-- 建议使用有线网络以获得更好的识别效果
-- 支持中文语音识别
+### 1. 多语言支持
+- 支持多种语言的语音识别和合成
+- 自动检测用户语言
+- 跨语言对话能力
 
-## 技术栈
+### 2. 上下文管理
+- 对话历史记录
+- 上下文感知
+- 个性化对话风格
 
-- 前端：HTML5, JavaScript (WebSocket, MediaRecorder API)
-- 后端：Node.js, Express
-- 实时通信：WebSocket
-- 语音识别：Azure Cognitive Services Speech SDK 
+### 3. 高级功能
+- 情感识别
+- 语音情感合成
+- 多轮对话优化
+- 知识库集成
+
+## 📅 后续计划
+
+### 短期计划
+- [ ] 添加对话历史记录
+- [ ] 支持多语言切换
+- [ ] 优化语音识别准确率
+- [ ] 添加错误重试机制
+
+### 中期计划
+- [ ] 集成更多LLM提供商
+- [ ] 添加语音情感识别
+- [ ] 实现离线语音识别
+- [ ] 添加用户认证系统
+
+### 长期计划
+- [ ] 支持自定义语音模型
+- [ ] 实现多模态交互
+- [ ] 构建知识图谱
+- [ ] 开发移动端应用
+
+## 🤝 贡献指南
+
+欢迎提交 Pull Request 或创建 Issue！
+
+1. Fork 项目
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 创建 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+## 🙏 致谢
+
+- [Azure Speech Service](https://azure.microsoft.com/services/cognitive-services/speech-services/)
+- [OpenAI](https://openai.com/)
+- 所有贡献者
+
+## 📞 联系方式
+
+- 项目维护者：[chicogong](https://github.com/yourusername)
+- 邮箱：chicogong@example.com
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ by <a href="https://github.com/yourusername">Your Name</a></sub>
+</div> 
