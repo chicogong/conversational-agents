@@ -36,7 +36,8 @@ const ttsConfig = sdk.SpeechConfig.fromSubscription(
     process.env.AZURE_SPEECH_REGION
 );
 ttsConfig.speechSynthesisLanguage = 'zh-CN';
-ttsConfig.speechSynthesisVoiceName = 'zh-CN-XiaochenMultilingualNeural'; 
+ttsConfig.speechSynthesisVoiceName = 'zh-CN-XiaochenMultilingualNeural';
+ttsConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_SynthOutputFormat, "audio-16khz-128kbitrate-mono-mp3");
 
 /**
  * OpenAI API 配置
@@ -68,7 +69,7 @@ async function callLLM(text, ws) {
             messages: [
                 {
                     role: "system",
-                    content: "你是一个智能语音助手，请用口语化、简短的回答客户问题，不要回复任何表情符号"
+                    content: "你是一个智能语音助手小蕊，请用口语化、简短的回答客户问题，不要回复任何表情符号"
                 },
                 {
                     role: "user",
@@ -150,18 +151,15 @@ async function textToSpeech(text, ws) {
         const startTime = Date.now();
         console.log('[TTS] 开始语音合成，文本:', text);
         
-        // 如果已经有正在进行的TTS，先取消它
         if (ws.currentSynthesizer) {
             console.log('[TTS] 取消之前的TTS合成');
             ws.currentSynthesizer.close();
             ws.currentSynthesizer = null;
         }
         
-        // 创建新的语音合成器
         const synthesizer = new sdk.SpeechSynthesizer(ttsConfig);
         ws.currentSynthesizer = synthesizer;
         
-        // 使用 speakTextAsync 方法
         const result = await new Promise((resolve, reject) => {
             let firstFrameTime = null;
             
@@ -185,7 +183,6 @@ async function textToSpeech(text, ws) {
             );
         });
 
-        // 检查是否被取消
         if (!ws.currentSynthesizer) {
             console.log('[TTS] 合成被取消');
             return;
@@ -194,11 +191,8 @@ async function textToSpeech(text, ws) {
         if (result && result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
             console.log('[TTS] 语音合成成功，音频数据大小:', result.audioData ? result.audioData.length : 0);
             
-            // 将音频数据转换为可序列化的格式
-            const audioData = Array.from(new Uint8Array(result.audioData));
-            ws.send(JSON.stringify({
-                audioData: audioData
-            }));
+            // Send binary data directly without JSON serialization
+            ws.send(result.audioData);
         } else {
             const errorDetails = result ? 
                 `原因: ${result.reason}, 错误: ${result.errorDetails}` : 

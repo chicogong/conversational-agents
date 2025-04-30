@@ -289,6 +289,13 @@
             };
 
             websocket.onmessage = (event) => {
+                // Check if the message is binary data (audio)
+                if (event.data instanceof Blob) {
+                    addToAudioQueue(event.data);
+                    return;
+                }
+                
+                // Handle JSON messages
                 const data = JSON.parse(event.data);
                 
                 if (data.transcription) {
@@ -296,8 +303,6 @@
                 } else if (data.llmResponse) {
                     hideTypingIndicator();
                     addMessage(data.llmResponse);
-                } else if (data.audioData) {
-                    addToAudioQueue(data.audioData);
                 } else if (data.interrupt) {
                     handleInterruption();
                 } else if (data.error) {
@@ -333,7 +338,7 @@
 
         /**
          * 添加音频到队列
-         * @param {Array} audioData - 音频数据
+         * @param {Blob} audioData - 音频数据
          */
         function addToAudioQueue(audioData) {
             audioQueue.push(audioData);
@@ -359,15 +364,20 @@
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 }
                 
-                const buffer = await audioContext.decodeAudioData(new Uint8Array(audioData).buffer);
+                // Create URL from blob and play it
+                const audioUrl = URL.createObjectURL(audioData);
+                const response = await fetch(audioUrl);
+                const arrayBuffer = await response.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
                 const source = audioContext.createBufferSource();
-                source.buffer = buffer;
+                source.buffer = audioBuffer;
                 source.connect(audioContext.destination);
                 
-                // 保存当前source以便中断
                 currentSource = source;
                 
                 source.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
                     currentSource = null;
                     playNextAudio();
                 };
@@ -376,7 +386,7 @@
             } catch (error) {
                 console.error('[错误] 音频播放错误:', error);
                 currentSource = null;
-                playNextAudio(); // 继续播放下一个
+                playNextAudio();
             }
         }
 
