@@ -4,8 +4,10 @@
 
 <div align="center">
 
-[![AI Agent](https://img.shields.io/badge/AI_Agent-2.0.0-blue.svg)](https://cloud.tencent.com/document/product/647/110584)
-[![Conversational AI](https://img.shields.io/badge/Conversational_AI-2.0.0-blue.svg)](https://cloud.tencent.com/product/trtc)
+
+[![Conversational AI](https://img.shields.io/badge/Conversational_AI-2.0.0-blue.svg)](https://github.com/chicogong/conversational-agents)
+[![WebSocket](https://img.shields.io/badge/WebSocket-2.0.0-blue.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket)
+[![AI Agent](https://img.shields.io/badge/AI_Agent-2.0.0-blue.svg)](https://github.com/chicogong/conversational-agents)
 [![Node.js](https://img.shields.io/badge/Node.js-18.0.0-green.svg)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
