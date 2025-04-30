@@ -1,14 +1,19 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
-const sdk = require('microsoft-cognitiveservices-speech-sdk');
-const path = require('path');
-const OpenAI = require('openai');
+import 'dotenv/config';
+import express from 'express';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import sdk from 'microsoft-cognitiveservices-speech-sdk';
+import path from 'path';
+import OpenAI from 'openai';
+import WebmClusterStream from 'webm-cluster-stream';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocketServer({ server });
 
 /**
  * 配置静态文件服务
@@ -24,9 +29,17 @@ const speechConfig = sdk.SpeechConfig.fromSubscription(
     process.env.AZURE_SPEECH_REGION
 );
 speechConfig.speechRecognitionLanguage = 'zh-CN';
+// 恢复较长的超时设置以适应WebM格式
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "5000");
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500");
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true");
+// 设置更积极的识别模式
+speechConfig.setProperty(sdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText");
+// 启用语言检测
+speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_AutoDetectSourceLanguages, "zh-CN");
+// 启用混合识别
+speechConfig.enableAudioLogging();
+console.log('[初始化] Azure语音服务配置完成');
 
 /**
  * Azure TTS 语音合成配置
@@ -103,13 +116,13 @@ async function callLLM(text, ws) {
                 fullResponse += content;
                 currentSentence += content;
                 
+                // 更新前端显示的完整响应
+                ws.send(JSON.stringify({
+                    llmResponse: fullResponse
+                }));
+                
                 // 检查是否遇到句子结束的标点符号
                 if (/[！。？：，]/.test(content)) {
-                    // 发送当前句子到前端显示
-                    ws.send(JSON.stringify({
-                        llmResponse: currentSentence
-                    }));
-                    
                     // 对当前句子进行TTS
                     await textToSpeech(currentSentence, ws);
                     
@@ -121,9 +134,6 @@ async function callLLM(text, ws) {
         
         // 处理最后一个不完整的句子
         if (currentSentence.trim()) {
-            ws.send(JSON.stringify({
-                llmResponse: currentSentence
-            }));
             await textToSpeech(currentSentence, ws);
         }
 
@@ -218,112 +228,206 @@ async function textToSpeech(text, ws) {
 /**
  * WebSocket连接处理
  */
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws) => {
     console.log('[WebSocket] 新的WebSocket连接');
     let pushStream = null;
     let audioConfig = null;
     let recognizer = null;
     let currentText = '';
     let isUserSpeaking = false;
+    let opusDecoder = null;
+    let webmDecoder = null;
+    let audioBuffers = [];
+    let audioDataReceived = false;
+    
+    // 尝试解析Opus帧的函数
+    async function tryExtractOpusFrames(data) {
+        try {
+            // 检查数据是否为空
+            if (!data || data.length === 0) {
+                console.log('[语音识别] 收到空的音频数据');
+                return false;
+            }
+            
+            // 解析收到的数据
+            const buffer = Buffer.from(data);
+            
+            // 基本的音频活动检测
+            let hasActivity = false;
+            let sum = 0;
+            
+            // 检查是否为Int16Array数据 (从前端ScriptProcessor发送)
+            if (buffer.length >= 2 && buffer.length % 2 === 0) {
+                for (let i = 0; i < buffer.length; i += 2) {
+                    const sample = buffer.readInt16LE(i);
+                    sum += Math.abs(sample);
+                }
+                
+                // 判断是否有有效音频（平均振幅大于阈值）
+                const avgMagnitude = sum / (buffer.length / 2);
+                hasActivity = avgMagnitude > 100; // 设置合适的阈值
+                
+                if (hasActivity) {
+                    console.log('[语音识别] 检测到音频活动，平均振幅:', avgMagnitude.toFixed(2));
+                    // 直接发送PCM数据
+                    pushStream.write(buffer);
+                    return true;
+                } else {
+                    console.log('[语音识别] 未检测到音频活动，平均振幅:', avgMagnitude.toFixed(2));
+                    return false;
+                }
+            } else {
+                console.log('[语音识别] 无效的音频格式，长度:', buffer.length);
+                return false;
+            }
+        } catch (error) {
+            console.error('[错误] 处理音频数据时出错:', error);
+            return false;
+        }
+    }
 
     /**
      * 创建新的语音识别器
      */
-    const setupRecognizer = () => {
+    const setupRecognizer = async () => {
         console.log('[语音识别] 正在设置语音识别器...');
-        pushStream = sdk.AudioInputStream.createPushStream();
-        audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
-        recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+        try {
+            // 创建用于接收音频数据的推流
+            const pushFormat = sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1);
+            pushStream = sdk.AudioInputStream.createPushStream(pushFormat);
+            
+            // 创建音频配置
+            audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
+            
+            // 创建语音识别器
+            recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+            
+            console.log('[语音识别] 成功创建语音识别器和音频流');
 
-        recognizer.recognized = (s, e) => {
-            if (e.result.text) {
-                console.log('[语音识别] 识别结果:', e.result.text);
-                currentText = e.result.text;
-                
-                // 如果用户正在说话，取消当前的LLM响应和TTS
-                if (isUserSpeaking) {
-                    if (ws.llmStream) {
-                        ws.llmStream.controller.abort();
-                        ws.llmStream = null;
-                    }
-                    if (ws.currentSynthesizer) {
-                        ws.currentSynthesizer.close();
-                        ws.currentSynthesizer = null;
-                    }
-                    // 发送中断信号到前端
+            // 添加所有事件监听
+            recognizer.recognizing = (s, e) => {
+                if (e.result.text) {
+                    console.log('[语音识别] 正在识别:', e.result.text);
+                    // 将中间识别结果发送给前端
                     ws.send(JSON.stringify({
-                        interrupt: true
+                        partialTranscription: e.result.text
                     }));
                 }
-                
-                ws.send(JSON.stringify({
-                    transcription: e.result.text
-                }));
-                // 调用大模型
-                callLLM(e.result.text, ws);
-            }
-        };
+            };
 
-        recognizer.sessionStarted = (s, e) => {
-            console.log('[语音识别] 识别会话开始');
-            isUserSpeaking = true;
-        };
+            recognizer.recognized = (s, e) => {
+                if (e.result.text) {
+                    console.log('[语音识别] 识别结果:', e.result.text);
+                    currentText = e.result.text;
+                    
+                    // 如果用户正在说话，取消当前的LLM响应和TTS
+                    if (isUserSpeaking) {
+                        if (ws.llmStream) {
+                            ws.llmStream.controller.abort();
+                            ws.llmStream = null;
+                        }
+                        if (ws.currentSynthesizer) {
+                            ws.currentSynthesizer.close();
+                            ws.currentSynthesizer = null;
+                        }
+                        // 发送中断信号到前端
+                        ws.send(JSON.stringify({
+                            interrupt: true
+                        }));
+                    }
+                    
+                    ws.send(JSON.stringify({
+                        transcription: e.result.text
+                    }));
+                    // 调用大模型
+                    callLLM(e.result.text, ws);
+                } else {
+                    console.log('[语音识别] 识别完成但没有文本结果');
+                }
+            };
 
-        recognizer.sessionStopped = (s, e) => {
-            console.log('[语音识别] 识别会话结束');
-            isUserSpeaking = false;
-        };
+            recognizer.sessionStarted = (s, e) => {
+                console.log('[语音识别] 识别会话开始');
+                isUserSpeaking = true;
+            };
 
-        recognizer.startContinuousRecognitionAsync(
-            () => console.log('[语音识别] 开始连续识别'),
-            error => console.error('[错误] 识别错误:', error)
-        );
+            recognizer.sessionStopped = (s, e) => {
+                console.log('[语音识别] 识别会话结束');
+                isUserSpeaking = false;
+            };
+
+            recognizer.canceled = (s, e) => {
+                console.error('[语音识别] 取消原因:', e.errorDetails);
+            };
+
+            recognizer.startContinuousRecognitionAsync(
+                () => console.log('[语音识别] 开始连续识别'),
+                error => console.error('[错误] 识别错误:', error)
+            );
+        } catch (error) {
+            console.error('[错误] 设置语音识别器时出错:', error);
+            ws.send(JSON.stringify({
+                error: '设置语音识别器失败: ' + error.message
+            }));
+        }
     };
 
-    setupRecognizer();
+    await setupRecognizer();
+
+    // 发送初始状态到客户端
+    ws.send(JSON.stringify({
+        status: 'ready',
+        message: '服务器已准备好，可以开始对话'
+    }));
 
     /**
      * 处理接收到的音频数据
      */
-    ws.on('message', (data) => {
-        if (pushStream) {
-            try {
-                // 确保数据是Buffer类型
-                let buffer;
-                if (data instanceof Buffer) {
-                    buffer = data;
-                } else if (data instanceof ArrayBuffer) {
-                    buffer = Buffer.from(data);
-                } else if (data instanceof Uint8Array) {
-                    buffer = Buffer.from(data);
-                } else {
-                    console.error('[错误] 不支持的音频数据格式:', typeof data);
-                    return;
-                }
-                
-                console.log('[音频] 收到音频数据，大小:', buffer.length, 'bytes');
-                pushStream.write(buffer);
-            } catch (error) {
-                console.error('[错误] 处理音频数据时出错:', error);
+    ws.on('message', async (data) => {
+        if (!audioDataReceived) {
+            audioDataReceived = true;
+            console.log('[WebSocket] 首次接收到音频数据，大小:', data.length, 'bytes');
+            
+            // 检查数据格式
+            const dataBuffer = Buffer.from(data);
+            console.log('[WebSocket] 数据前8字节:', dataBuffer.slice(0, Math.min(8, dataBuffer.length)).toString('hex'));
+        }
+        
+        try {
+            // 直接处理数据
+            const success = await tryExtractOpusFrames(data);
+            if (success) {
+                console.log('[语音识别] 音频数据已发送到Azure语音服务');
             }
-        } else {
-            console.error('[错误] pushStream未初始化');
+        } catch (error) {
+            console.error('[错误] 处理音频数据时出错:', error);
+            ws.send(JSON.stringify({
+                error: '处理音频数据失败: ' + error.message
+            }));
         }
     });
 
     /**
      * 处理连接关闭
      */
-    ws.on('close', () => {
+    ws.on('close', async () => {
         console.log('[WebSocket] 连接关闭');
         if (recognizer) {
             recognizer.stopContinuousRecognitionAsync(
-                () => {
+                async () => {
                     console.log('[语音识别] 识别器已停止');
                     recognizer.close();
                     pushStream = null;
                     audioConfig = null;
                     recognizer = null;
+                    if (opusDecoder) {
+                        // OpusDecoder doesn't have a destroy method in this version
+                        opusDecoder = null;
+                    }
+                    if (webmDecoder) {
+                        webmDecoder.end();
+                        webmDecoder = null;
+                    }
                 },
                 error => console.error('[错误] 停止识别错误:', error)
             );
@@ -333,6 +437,10 @@ wss.on('connection', (ws) => {
             ws.currentSynthesizer.close();
             ws.currentSynthesizer = null;
         }
+    });
+
+    ws.on('error', (error) => {
+        console.error('[WebSocket] 连接错误:', error);
     });
 });
 
