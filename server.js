@@ -67,6 +67,10 @@ async function callLLM(text, ws) {
             model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
             messages: [
                 {
+                    role: "system",
+                    content: "你是一个智能语音助手，请用口语化、简短的回答客户问题，不要回复任何表情符号"
+                },
+                {
                     role: "user",
                     content: text
                 }
