@@ -115,6 +115,7 @@
         // 音频播放队列
         const audioQueue = [];
         let isPlaying = false;
+        let currentSource = null;
 
         // 初始化WebSocket连接
         function initWebSocket() {
@@ -137,6 +138,9 @@
                 } else if (data.audioData) {
                     // 将音频数据添加到队列
                     addToAudioQueue(data.audioData);
+                } else if (data.interrupt) {
+                    // 处理中断信号
+                    handleInterruption();
                 } else if (data.error) {
                     const errorElement = document.createElement('div');
                     errorElement.className = 'llm-response';
@@ -158,6 +162,23 @@
                 console.error('WebSocket错误:', error);
                 status.textContent = 'WebSocket错误';
             };
+        }
+
+        // 处理中断
+        function handleInterruption() {
+            // 停止当前播放的音频
+            if (currentSource) {
+                currentSource.stop();
+                currentSource = null;
+            }
+            
+            // 清空音频队列
+            audioQueue.length = 0;
+            isPlaying = false;
+            
+            // 清空LLM响应
+            currentLLMResponse = '';
+            llmResponse.textContent = '';
         }
 
         // 添加音频到队列
@@ -188,13 +209,18 @@
                 source.buffer = buffer;
                 source.connect(audioContext.destination);
                 
+                // 保存当前source以便中断
+                currentSource = source;
+                
                 source.onended = () => {
+                    currentSource = null;
                     playNextAudio();
                 };
                 
                 source.start(0);
             } catch (error) {
                 console.error('音频播放错误:', error);
+                currentSource = null;
                 playNextAudio(); // 继续播放下一个
             }
         }
@@ -261,6 +287,7 @@
             // 清空音频队列
             audioQueue.length = 0;
             isPlaying = false;
+            currentSource = null;
         }
 
         // 事件监听

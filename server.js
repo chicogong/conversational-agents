@@ -41,6 +41,12 @@ const openai = new OpenAI({
 // 调用大模型
 async function callLLM(text, ws) {
     try {
+        // 如果已经有正在进行的LLM调用，先取消它
+        if (ws.llmStream) {
+            ws.llmStream.controller.abort();
+            ws.llmStream = null;
+        }
+
         const stream = await openai.chat.completions.create({
             model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
             messages: [
@@ -52,10 +58,19 @@ async function callLLM(text, ws) {
             stream: true
         });
 
+        // 保存stream引用以便后续取消
+        ws.llmStream = stream;
+
         let fullResponse = '';
         let currentSentence = '';
         
         for await (const chunk of stream) {
+            // 检查是否被取消
+            if (!ws.llmStream) {
+                console.log('LLM响应被取消');
+                return;
+            }
+
             const content = chunk.choices[0]?.delta?.content;
             if (content) {
                 fullResponse += content;
@@ -84,7 +99,14 @@ async function callLLM(text, ws) {
             }));
             await textToSpeech(currentSentence, ws);
         }
+
+        // 清除stream引用
+        ws.llmStream = null;
     } catch (error) {
+        if (error.name === 'AbortError') {
+            console.log('LLM响应被取消');
+            return;
+        }
         console.error('调用LLM出错:', error);
         ws.send(JSON.stringify({
             error: '调用大模型时出错'
@@ -97,8 +119,16 @@ async function textToSpeech(text, ws) {
     try {
         console.log('开始语音合成，文本:', text);
         
+        // 如果已经有正在进行的TTS，先取消它
+        if (ws.currentSynthesizer) {
+            console.log('取消之前的TTS合成');
+            ws.currentSynthesizer.close();
+            ws.currentSynthesizer = null;
+        }
+        
         // 创建新的语音合成器
         const synthesizer = new sdk.SpeechSynthesizer(ttsConfig);
+        ws.currentSynthesizer = synthesizer;
         
         // 使用 speakTextAsync 方法
         const result = await new Promise((resolve, reject) => {
@@ -114,6 +144,12 @@ async function textToSpeech(text, ws) {
                 }
             );
         });
+
+        // 检查是否被取消
+        if (!ws.currentSynthesizer) {
+            console.log('TTS合成被取消');
+            return;
+        }
 
         if (result && result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
             console.log('语音合成成功，音频数据大小:', result.audioData ? result.audioData.length : 0);
@@ -134,6 +170,9 @@ async function textToSpeech(text, ws) {
         }
         
         synthesizer.close();
+        if (ws.currentSynthesizer === synthesizer) {
+            ws.currentSynthesizer = null;
+        }
     } catch (error) {
         console.error('TTS错误:', error);
         ws.send(JSON.stringify({
@@ -149,6 +188,7 @@ wss.on('connection', (ws) => {
     let audioConfig = null;
     let recognizer = null;
     let currentText = '';
+    let isUserSpeaking = false;
 
     // 创建新的识别器
     const setupRecognizer = () => {
@@ -161,6 +201,23 @@ wss.on('connection', (ws) => {
             if (e.result.text) {
                 console.log('识别结果:', e.result.text);
                 currentText = e.result.text;
+                
+                // 如果用户正在说话，取消当前的LLM响应和TTS
+                if (isUserSpeaking) {
+                    if (ws.llmStream) {
+                        ws.llmStream.controller.abort();
+                        ws.llmStream = null;
+                    }
+                    if (ws.currentSynthesizer) {
+                        ws.currentSynthesizer.close();
+                        ws.currentSynthesizer = null;
+                    }
+                    // 发送中断信号到前端
+                    ws.send(JSON.stringify({
+                        interrupt: true
+                    }));
+                }
+                
                 ws.send(JSON.stringify({
                     transcription: e.result.text
                 }));
@@ -169,16 +226,14 @@ wss.on('connection', (ws) => {
             }
         };
 
-        recognizer.canceled = (s, e) => {
-            console.log('识别被取消:', e.errorDetails);
-        };
-
         recognizer.sessionStarted = (s, e) => {
             console.log('识别会话开始');
+            isUserSpeaking = true;
         };
 
         recognizer.sessionStopped = (s, e) => {
             console.log('识别会话结束');
+            isUserSpeaking = false;
         };
 
         recognizer.startContinuousRecognitionAsync(
@@ -230,6 +285,11 @@ wss.on('connection', (ws) => {
                 },
                 error => console.error('停止识别错误:', error)
             );
+        }
+        // 清理TTS资源
+        if (ws.currentSynthesizer) {
+            ws.currentSynthesizer.close();
+            ws.currentSynthesizer = null;
         }
     });
 });
