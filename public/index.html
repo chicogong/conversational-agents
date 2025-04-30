@@ -60,6 +60,16 @@
             border-radius: 4px;
             animation: fadeIn 0.3s ease-in;
         }
+        .llm-response {
+            font-size: 24px;
+            line-height: 1.5;
+            margin: 10px 0;
+            padding: 10px;
+            border-left: 4px solid #2196F3;
+            background-color: #f0f7ff;
+            border-radius: 4px;
+            animation: fadeIn 0.3s ease-in;
+        }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -89,6 +99,7 @@
     <div id="status">准备就绪</div>
     <div id="subtitle-container">
         <div id="subtitle"></div>
+        <div id="llm-response"></div>
     </div>
 
     <script>
@@ -98,6 +109,8 @@
         const stopButton = document.getElementById('stopButton');
         const status = document.getElementById('status');
         const subtitle = document.getElementById('subtitle');
+        const llmResponse = document.getElementById('llm-response');
+        let currentLLMResponse = '';
 
         // 初始化WebSocket连接
         function initWebSocket() {
@@ -121,6 +134,20 @@
                     
                     // 自动滚动到底部
                     subtitle.scrollTop = subtitle.scrollHeight;
+                }
+                
+                if (result.llmResponse) {
+                    currentLLMResponse += result.llmResponse;
+                    llmResponse.textContent = currentLLMResponse;
+                    llmResponse.scrollTop = llmResponse.scrollHeight;
+                }
+                
+                if (result.error) {
+                    const errorElement = document.createElement('div');
+                    errorElement.className = 'llm-response';
+                    errorElement.style.color = 'red';
+                    errorElement.textContent = result.error;
+                    llmResponse.appendChild(errorElement);
                 }
             };
 
@@ -191,6 +218,8 @@
             startButton.disabled = false;
             stopButton.disabled = true;
             status.textContent = '录音已停止';
+            currentLLMResponse = '';
+            llmResponse.textContent = '';
         }
 
         // 事件监听

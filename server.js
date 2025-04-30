@@ -4,6 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const sdk = require('microsoft-cognitiveservices-speech-sdk');
 const path = require('path');
+const OpenAI = require('openai');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,12 +24,49 @@ speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTi
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500");
 speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true");
 
+// OpenAI配置
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
+});
+
+// 调用大模型
+async function callLLM(text, ws) {
+    try {
+        const stream = await openai.chat.completions.create({
+            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            stream: true
+        });
+
+        for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content;
+            if (content) {
+                ws.send(JSON.stringify({
+                    llmResponse: content
+                }));
+            }
+        }
+    } catch (error) {
+        console.error('调用LLM出错:', error);
+        ws.send(JSON.stringify({
+            error: '调用大模型时出错'
+        }));
+    }
+}
+
 // WebSocket连接处理
 wss.on('connection', (ws) => {
     console.log('新的WebSocket连接');
     let pushStream = null;
     let audioConfig = null;
     let recognizer = null;
+    let currentText = '';
 
     // 创建新的识别器
     const setupRecognizer = () => {
@@ -40,9 +78,12 @@ wss.on('connection', (ws) => {
         recognizer.recognized = (s, e) => {
             if (e.result.text) {
                 console.log('识别结果:', e.result.text);
+                currentText = e.result.text;
                 ws.send(JSON.stringify({
                     transcription: e.result.text
                 }));
+                // 调用大模型
+                callLLM(e.result.text, ws);
             }
         };
 
