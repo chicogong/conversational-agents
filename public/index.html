@@ -460,14 +460,30 @@
          * 处理中断
          */
         function handleInterruption() {
+            console.log('[语音] 收到中断信号，立即停止播放');
+            
+            // 立即停止当前播放的音频
             if (currentSource) {
-                currentSource.stop();
+                try {
+                    currentSource.stop(0);
+                } catch(e) {
+                    console.error('[错误] 停止音频源失败:', e);
+                }
                 currentSource = null;
             }
             
+            // 清空音频队列
             audioQueue.length = 0;
             isPlaying = false;
+            
+            // 隐藏输入指示器
             hideTypingIndicator();
+            
+            // 清除AI的当前回复（可选）
+            // currentAIMessageId = null;
+            
+            // 更新UI状态
+            status.innerHTML = '<span class="recording-indicator"></span>正在收音...';
         }
 
         /**
@@ -562,10 +578,12 @@
                 console.log(`[录音] 原始采样率: ${sourceSampleRate}Hz, 目标采样率: ${destinationSampleRate}Hz`);
                 
                 // 创建分析器，用于检测音频活动
+                /*
                 const analyser = audioContext.createAnalyser();
                 analyser.fftSize = 2048;
                 const bufferLength = analyser.frequencyBinCount;
                 const dataArray = new Uint8Array(bufferLength);
+                */
                 
                 // 创建处理器
                 const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -575,8 +593,7 @@
                 let audioBuffer = new Float32Array(0);
                 
                 // 连接音频处理流
-                source.connect(analyser);
-                analyser.connect(processor);
+                source.connect(processor);
                 processor.connect(audioContext.destination);
                 
                 // 处理音频数据
@@ -586,6 +603,7 @@
                     const inputData = inputBuffer.getChannelData(0);
                     
                     // 检测音频活动
+                    /*
                     analyser.getByteFrequencyData(dataArray);
                     let sum = 0;
                     for (let i = 0; i < bufferLength; i++) {
@@ -595,15 +613,21 @@
                     
                     // 如果有声音活动，则收集音频数据
                     if (average > 5) { // 调整音频活动的阈值
-                        // 创建新的缓冲区
-                        const newBuffer = new Float32Array(audioBuffer.length + inputData.length);
-                        // 复制旧数据
-                        newBuffer.set(audioBuffer);
-                        // 添加新数据
-                        newBuffer.set(inputData, audioBuffer.length);
-                        // 更新缓冲区
-                        audioBuffer = newBuffer;
+                    */
+                    
+                    // 直接收集所有音频数据，不进行活动检测
+                    // 创建新的缓冲区
+                    const newBuffer = new Float32Array(audioBuffer.length + inputData.length);
+                    // 复制旧数据
+                    newBuffer.set(audioBuffer);
+                    // 添加新数据
+                    newBuffer.set(inputData, audioBuffer.length);
+                    // 更新缓冲区
+                    audioBuffer = newBuffer;
+                    
+                    /*
                     }
+                    */
                 };
                 
                 // 定期发送音频数据
@@ -643,12 +667,12 @@
                     audioContext: audioContext,
                     processor: processor,
                     source: source,
-                    analyser: analyser,
+                    // analyser: analyser,
                     interval: audioSendInterval,
                     stop: function() {
                         clearInterval(this.interval);
                         this.processor.disconnect();
-                        this.analyser.disconnect();
+                        // this.analyser.disconnect();
                         this.source.disconnect();
                         this.stream.getTracks().forEach(track => track.stop());
                         this.audioContext.close();

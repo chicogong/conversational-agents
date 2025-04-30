@@ -30,15 +30,15 @@ const speechConfig = sdk.SpeechConfig.fromSubscription(
 );
 speechConfig.speechRecognitionLanguage = 'zh-CN';
 // 恢复较长的超时设置以适应WebM格式
-speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "5000");
-speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500");
-speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true");
-// 设置更积极的识别模式
-speechConfig.setProperty(sdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText");
-// 启用语言检测
-speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_AutoDetectSourceLanguages, "zh-CN");
-// 启用混合识别
-speechConfig.enableAudioLogging();
+// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "5000");
+// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500");
+// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true");
+// // 设置更积极的识别模式
+// speechConfig.setProperty(sdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText");
+// // 启用语言检测
+// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_AutoDetectSourceLanguages, "zh-CN");
+// // 启用混合识别
+// speechConfig.enableAudioLogging();
 console.log('[初始化] Azure语音服务配置完成');
 
 /**
@@ -252,30 +252,48 @@ wss.on('connection', async (ws) => {
             // 解析收到的数据
             const buffer = Buffer.from(data);
             
-            // 基本的音频活动检测
-            let hasActivity = false;
-            let sum = 0;
-            
-            // 检查是否为Int16Array数据 (从前端ScriptProcessor发送)
+            // 直接发送所有收到的音频数据，不进行活动检测
             if (buffer.length >= 2 && buffer.length % 2 === 0) {
-                for (let i = 0; i < buffer.length; i += 2) {
+                // 简单检测是否有声音活动（只用于标记用户是否在说话，不过滤数据）
+                let sum = 0;
+                for (let i = 0; i < Math.min(buffer.length, 100); i += 2) {
                     const sample = buffer.readInt16LE(i);
                     sum += Math.abs(sample);
                 }
                 
-                // 判断是否有有效音频（平均振幅大于阈值）
-                const avgMagnitude = sum / (buffer.length / 2);
-                hasActivity = avgMagnitude > 100; // 设置合适的阈值
-                
-                if (hasActivity) {
-                    console.log('[语音识别] 检测到音频活动，平均振幅:', avgMagnitude.toFixed(2));
-                    // 直接发送PCM数据
-                    pushStream.write(buffer);
-                    return true;
+                const avgMagnitude = sum / (Math.min(buffer.length, 100) / 2);
+                if (avgMagnitude > 300) { // 较低的阈值，更敏感地检测语音开始
+                    if (!isUserSpeaking) {
+                        console.log('[语音识别] 检测到用户开始说话');
+                        isUserSpeaking = true;
+                        
+                        // 立即中断当前AI响应
+                        if (ws.llmStream || ws.currentSynthesizer) {
+                            console.log('[语音识别] 用户开始说话，立即中断AI响应');
+                            
+                            if (ws.llmStream) {
+                                ws.llmStream.controller.abort();
+                                ws.llmStream = null;
+                            }
+                            if (ws.currentSynthesizer) {
+                                ws.currentSynthesizer.close();
+                                ws.currentSynthesizer = null;
+                            }
+                            
+                            // 发送中断信号到前端
+                            ws.send(JSON.stringify({
+                                interrupt: true
+                            }));
+                        }
+                    }
                 } else {
-                    console.log('[语音识别] 未检测到音频活动，平均振幅:', avgMagnitude.toFixed(2));
-                    return false;
+                    // 如果一段时间没有声音活动，可以重置状态
+                    // 注意：实际使用时可能需要更复杂的逻辑来避免频繁切换状态
                 }
+                
+                // 无论如何都发送PCM数据
+                pushStream.write(buffer);
+                return true;
             } else {
                 console.log('[语音识别] 无效的音频格式，长度:', buffer.length);
                 return false;
@@ -308,6 +326,26 @@ wss.on('connection', async (ws) => {
             recognizer.recognizing = (s, e) => {
                 if (e.result.text) {
                     console.log('[语音识别] 正在识别:', e.result.text);
+                    
+                    // 检测到用户开始说话时立即中断AI响应
+                    if (ws.llmStream || ws.currentSynthesizer) {
+                        console.log('[语音识别] 检测到用户说话，立即中断当前AI响应');
+                        
+                        if (ws.llmStream) {
+                            ws.llmStream.controller.abort();
+                            ws.llmStream = null;
+                        }
+                        if (ws.currentSynthesizer) {
+                            ws.currentSynthesizer.close();
+                            ws.currentSynthesizer = null;
+                        }
+                        
+                        // 发送中断信号到前端
+                        ws.send(JSON.stringify({
+                            interrupt: true
+                        }));
+                    }
+                    
                     // 将中间识别结果发送给前端
                     ws.send(JSON.stringify({
                         partialTranscription: e.result.text
