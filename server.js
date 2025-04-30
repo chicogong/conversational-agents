@@ -36,7 +36,7 @@ const ttsConfig = sdk.SpeechConfig.fromSubscription(
     process.env.AZURE_SPEECH_REGION
 );
 ttsConfig.speechSynthesisLanguage = 'zh-CN';
-ttsConfig.speechSynthesisVoiceName = 'zh-CN-XiaoxiaoNeural'; // 使用晓晓语音
+ttsConfig.speechSynthesisVoiceName = 'zh-CN-XiaochenMultilingualNeural'; 
 
 /**
  * OpenAI API 配置
