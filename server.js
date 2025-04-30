@@ -41,6 +41,9 @@ const openai = new OpenAI({
 // 调用大模型
 async function callLLM(text, ws) {
     try {
+        const startTime = Date.now();
+        let llmFirstTokenTime = null;
+        
         // 如果已经有正在进行的LLM调用，先取消它
         if (ws.llmStream) {
             ws.llmStream.controller.abort();
@@ -73,6 +76,12 @@ async function callLLM(text, ws) {
 
             const content = chunk.choices[0]?.delta?.content;
             if (content) {
+                // 记录第一个token的时间
+                if (!llmFirstTokenTime) {
+                    llmFirstTokenTime = Date.now();
+                    console.log(`LLM首token耗时: ${llmFirstTokenTime - startTime}ms`);
+                }
+
                 fullResponse += content;
                 currentSentence += content;
                 
@@ -117,6 +126,7 @@ async function callLLM(text, ws) {
 // 文本转语音
 async function textToSpeech(text, ws) {
     try {
+        const startTime = Date.now();
         console.log('开始语音合成，文本:', text);
         
         // 如果已经有正在进行的TTS，先取消它
@@ -132,6 +142,15 @@ async function textToSpeech(text, ws) {
         
         // 使用 speakTextAsync 方法
         const result = await new Promise((resolve, reject) => {
+            let firstFrameTime = null;
+            
+            synthesizer.synthesizing = (s, e) => {
+                if (!firstFrameTime) {
+                    firstFrameTime = Date.now();
+                    console.log(`TTS首帧耗时: ${firstFrameTime - startTime}ms`);
+                }
+            };
+            
             synthesizer.speakTextAsync(
                 text,
                 result => {
