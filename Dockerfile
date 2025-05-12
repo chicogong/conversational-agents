@@ -1,31 +1,36 @@
-FROM node:18-slim
+FROM node:18-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Install necessary system dependencies for the speech SDK
-RUN apt-get update && apt-get install -y \
-    python3 \
-    build-essential \
-    libasound2 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy package.json and package-lock.json (if available)
+# Copy package files first (for better layer caching)
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install
+RUN npm ci --only=production
 
-# Copy all project files
+# Copy source files
 COPY . .
 
-# Expose the port the app runs on
-EXPOSE 8080
+# Production image stage
+FROM node:18-alpine
 
-# Set environment variables (these can be overridden at runtime)
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=8080
+# Set working directory
+WORKDIR /app
+
+# Install only essential dependencies
+RUN apk add --no-cache alsa-lib
+
+# Copy from builder stage
+COPY --from=builder /app /app
+
+# Set environment variables
+ENV NODE_ENV=production \
+    SERVER_HOST=0.0.0.0 \
+    SERVER_PORT=8080
+
+# Expose the port
+EXPOSE 8080
 
 # Command to run the application
 CMD ["node", "server.js"] 
