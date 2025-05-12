@@ -1,12 +1,13 @@
 import sdk from 'microsoft-cognitiveservices-speech-sdk';
 import { createSpeechConfig, detectVoiceActivity } from './speechService.js';
 import { callLLM, cancelOngoingActivities } from './llmService.js';
+import logger from './logger.js';
 
 /**
  * 处理新的WebSocket连接
  */
 export function handleConnection(ws) {
-  console.log('[WebSocket] 新的WebSocket连接');
+  logger.info('[WebSocket] 新的WebSocket连接');
   let pushStream = null;
   let audioConfig = null;
   let recognizer = null;
@@ -32,7 +33,7 @@ export function handleConnection(ws) {
         // 检测声音活动
         const hasVoiceActivity = detectVoiceActivity(buffer);
         if (hasVoiceActivity && !ws.isUserSpeaking) {
-          console.log('[语音识别] 检测到用户开始说话');
+          logger.debug('[语音识别] 检测到用户开始说话');
           ws.isUserSpeaking = true;
           
           // 中断当前响应
@@ -45,11 +46,11 @@ export function handleConnection(ws) {
           return true;
         }
       } else {
-        console.log('[语音识别] 无效的音频格式，长度:', buffer.length);
+        logger.warn('[语音识别] 无效的音频格式，长度:', buffer.length);
       }
       return false;
     } catch (error) {
-      console.error('[错误] 处理音频数据时出错:', error);
+      logger.error('[错误] 处理音频数据时出错:', error);
       return false;
     }
   }
@@ -58,7 +59,7 @@ export function handleConnection(ws) {
    * 设置语音识别器
    */
   async function setupRecognizer() {
-    console.log('[语音识别] 正在设置语音识别器...');
+    logger.info('[语音识别] 正在设置语音识别器...');
     try {
       // 创建音频流和识别器
       const pushFormat = sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1);
@@ -66,12 +67,12 @@ export function handleConnection(ws) {
       audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
       recognizer = new sdk.SpeechRecognizer(createSpeechConfig(), audioConfig);
       
-      console.log('[语音识别] 成功创建语音识别器和音频流');
+      logger.info('[语音识别] 成功创建语音识别器和音频流');
 
       // 配置识别事件处理
       recognizer.recognizing = (s, e) => {
         if (e.result.text && ws.connectionActive) {
-          console.log('[语音识别] 正在识别:', e.result.text);
+          logger.debug('[语音识别] 正在识别:', e.result.text);
           
           // 中断当前AI响应
           cancelOngoingActivities(ws);
@@ -83,7 +84,7 @@ export function handleConnection(ws) {
 
       recognizer.recognized = (s, e) => {
         if (e.result.text && ws.connectionActive) {
-          console.log('[语音识别] 识别结果:', e.result.text);
+          logger.info('[语音识别] 识别结果:', e.result.text);
           
           // 取消进行中的响应
           cancelOngoingActivities(ws);
@@ -94,22 +95,22 @@ export function handleConnection(ws) {
           // 调用大模型
           callLLM(e.result.text, ws);
         } else {
-          console.log('[语音识别] 识别完成但没有文本结果');
+          logger.debug('[语音识别] 识别完成但没有文本结果');
         }
       };
 
       recognizer.sessionStarted = () => {
-        console.log('[语音识别] 识别会话开始');
+        logger.info('[语音识别] 识别会话开始');
         ws.isUserSpeaking = true;
       };
 
       recognizer.sessionStopped = () => {
-        console.log('[语音识别] 识别会话结束');
+        logger.info('[语音识别] 识别会话结束');
         ws.isUserSpeaking = false;
       };
 
       recognizer.canceled = (s, e) => {
-        console.error('[语音识别] 取消原因:', e.errorDetails);
+        logger.error('[语音识别] 取消原因:', e.errorDetails);
       };
 
       // 开始连续识别
@@ -121,18 +122,18 @@ export function handleConnection(ws) {
         recognizer.startContinuousRecognitionAsync(
           () => {
             clearTimeout(timeoutId);
-            console.log('[语音识别] 开始连续识别');
+            logger.info('[语音识别] 开始连续识别');
             resolve();
           },
           error => {
             clearTimeout(timeoutId);
-            console.error('[错误] 识别错误:', error);
+            logger.error('[错误] 识别错误:', error);
             reject(error);
           }
         );
       });
     } catch (error) {
-      console.error('[错误] 设置语音识别器时出错:', error);
+      logger.error('[错误] 设置语音识别器时出错:', error);
       if (ws.connectionActive) {
         ws.send(JSON.stringify({ error: '设置语音识别器失败: ' + error.message }));
       }
@@ -151,7 +152,7 @@ export function handleConnection(ws) {
       if (recognizer) {
         await new Promise((resolve, reject) => {
           const timeoutId = setTimeout(() => {
-            console.log('[语音识别] 停止识别超时，强制关闭');
+            logger.warn('[语音识别] 停止识别超时，强制关闭');
             if (recognizer) {
               try { recognizer.close(); } catch (e) { }
             }
@@ -161,13 +162,13 @@ export function handleConnection(ws) {
           recognizer.stopContinuousRecognitionAsync(
             () => {
               clearTimeout(timeoutId);
-              console.log('[语音识别] 识别器已停止');
+              logger.info('[语音识别] 识别器已停止');
               recognizer.close();
               resolve();
             },
             error => {
               clearTimeout(timeoutId);
-              console.error('[错误] 停止识别错误:', error);
+              logger.error('[错误] 停止识别错误:', error);
               try { recognizer.close(); } catch (e) { }
               resolve(); // 即使出错也继续清理
             }
@@ -183,7 +184,7 @@ export function handleConnection(ws) {
       // 清理TTS资源
       cancelOngoingActivities(ws, false);
     } catch (error) {
-      console.error('[错误] 清理资源时出错:', error);
+      logger.error('[错误] 清理资源时出错:', error);
     }
   }
 
@@ -193,7 +194,7 @@ export function handleConnection(ws) {
       try {
         ws.ping();
       } catch (e) {
-        console.error('[WebSocket] 心跳检测失败:', e);
+        logger.error('[WebSocket] 心跳检测失败:', e);
       }
     } else {
       clearInterval(pingInterval);
@@ -218,7 +219,7 @@ export function handleConnection(ws) {
       ws.on('message', async (data) => {
         if (!audioDataReceived && ws.connectionActive) {
           audioDataReceived = true;
-          console.log('[WebSocket] 首次接收到音频数据，大小:', data.length, 'bytes');
+          logger.info('[WebSocket] 首次接收到音频数据，大小:', data.length, 'bytes');
         }
         
         await processAudioData(data);
@@ -226,18 +227,18 @@ export function handleConnection(ws) {
 
       // 处理连接关闭
       ws.on('close', async () => {
-        console.log('[WebSocket] 连接关闭');
+        logger.info('[WebSocket] 连接关闭');
         clearInterval(pingInterval);
         await cleanupResources();
       });
 
       // 处理错误
       ws.on('error', (error) => {
-        console.error('[WebSocket] 连接错误:', error);
+        logger.error('[WebSocket] 连接错误:', error);
         clearInterval(pingInterval);
       });
     } catch (error) {
-      console.error('[错误] WebSocket连接处理失败:', error);
+      logger.error('[错误] WebSocket连接处理失败:', error);
       clearInterval(pingInterval);
     }
   })();

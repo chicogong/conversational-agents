@@ -1,5 +1,6 @@
 import sdk from 'microsoft-cognitiveservices-speech-sdk';
 import config from '../config.js';
+import logger from './logger.js';
 
 /**
  * 初始化语音识别配置
@@ -49,7 +50,7 @@ export function detectVoiceActivity(buffer) {
  */
 export async function textToSpeech(text, ws) {
   const startTime = Date.now(); // 开始时间
-  console.log('[TTS] 开始语音合成，文本:', text);
+  logger.info('[TTS] 开始语音合成，文本:', text);
   
   try {
     if (ws.currentSynthesizer) {
@@ -70,13 +71,13 @@ export async function textToSpeech(text, ws) {
 
     // 检查合成是否被取消
     if (!ws.currentSynthesizer) {
-      console.log('[TTS] 合成被取消');
+      logger.info('[TTS] 合成被取消');
       return;
     }
 
     if (result && result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
       const endTime = Date.now(); // 音频数据准备好的时间
-      console.log(`[性能] TTS首帧耗时: ${endTime - startTime}ms`);
+      logger.info(`[性能] TTS首帧耗时: ${endTime - startTime}ms`);
       
       // 发送音频数据
       ws.send(result.audioData);
@@ -84,7 +85,7 @@ export async function textToSpeech(text, ws) {
       const errorDetails = result ? 
         `原因: ${result.reason}, 错误: ${result.errorDetails}` : 
         '未知错误';
-      console.error('[错误] 语音合成失败:', errorDetails);
+      logger.error('[错误] 语音合成失败:', errorDetails);
       ws.send(JSON.stringify({ error: `语音合成失败: ${errorDetails}` }));
     }
     
@@ -93,7 +94,7 @@ export async function textToSpeech(text, ws) {
       ws.currentSynthesizer = null;
     }
   } catch (error) {
-    console.error('[错误] TTS错误:', error);
+    logger.error('[错误] TTS错误:', error);
     ws.send(JSON.stringify({ error: `语音合成出错: ${error.message}` }));
   }
 } 

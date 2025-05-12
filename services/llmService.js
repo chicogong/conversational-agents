@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import config from '../config.js';
 import { textToSpeech } from './speechService.js';
+import logger from './logger.js';
 
 // OpenAI API 客户端
 const openai = new OpenAI({
@@ -62,7 +63,7 @@ export async function processNextTTS(ws) {
       ws.processingTTS = false;
     }
   } catch (error) {
-    console.error('[错误] 处理TTS队列错误:', error);
+    logger.error('[错误] 处理TTS队列错误:', error);
     ws.processingTTS = false;
     ws.ttsPendingSentences.length = 0; // 出错时清空队列，避免卡死
   }
@@ -103,7 +104,7 @@ export async function callLLM(text, ws) {
     for await (const chunk of stream) {
       // 检查是否被取消
       if (!ws.llmStream) {
-        console.log('[LLM] 响应被取消');
+        logger.info('[LLM] 响应被取消');
         return;
       }
 
@@ -112,7 +113,7 @@ export async function callLLM(text, ws) {
         // 记录第一个token的时间
         if (!llmFirstTokenTime) {
           llmFirstTokenTime = Date.now();
-          console.log(`[性能] LLM首token耗时: ${llmFirstTokenTime - startTime}ms`);
+          logger.info(`[性能] LLM首token耗时: ${llmFirstTokenTime - startTime}ms`);
         }
 
         fullResponse += content;
@@ -145,10 +146,10 @@ export async function callLLM(text, ws) {
     ws.llmStream = null;
   } catch (error) {
     if (error.name === 'AbortError') {
-      console.log('[LLM] 响应被取消');
+      logger.info('[LLM] 响应被取消');
       return;
     }
-    console.error('[错误] 调用LLM出错:', error);
+    logger.error('[错误] 调用LLM出错:', error);
     ws.send(JSON.stringify({ error: '调用大模型时出错' }));
   }
 } 
