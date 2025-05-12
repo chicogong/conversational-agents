@@ -85,36 +85,52 @@ npm start
 ### 系统架构图
 
 ```mermaid
-graph TD
-    User((用户)) --- Browser[浏览器]
+flowchart TB
+    User((用户))
+    Browser[浏览器]
     
-    subgraph 客户端
-        Browser --> AudioCapture[音频捕获\nWeb Audio API]
-        Browser <-- AudioPlayback[音频播放]
-        AudioCapture --> WSClient[WebSocket 客户端]
-        WSClient --> AudioPlayback
+    subgraph 客户端["客户端"]
+        direction TB
+        Browser --> AudioCapture["音频捕获\nWeb Audio API"]
+        AudioPlayback["音频播放"] --> Browser
+        AudioCapture ==> WSClient["WebSocket 客户端"]
+        WSClient ==> AudioPlayback
     end
     
-    subgraph 服务端
-        WSClient <---> WSServer[WebSocket 服务]
-        WSServer --> ASR[语音识别模块\nAzure Speech]
-        ASR --> LLM[大语言模型\nOpenAI/GPT]
-        LLM --> TTS[语音合成模块\nAzure TTS]
-        TTS --> WSServer
+    subgraph 服务端["服务端"]
+        direction TB
+        WSServer["WebSocket 服务"] ==> ASR["语音识别模块\nAzure Speech"]
+        ASR ==> LLM["大语言模型\nOpenAI/GPT"]
+        LLM ==> TTS["语音合成模块\nAzure TTS"]
+        TTS ==> WSServer
     end
     
+    User <===> Browser
+    WSClient <===> WSServer
     AudioPlayback --> User
     
-    subgraph 扩展功能
-        LLM --- Tools[外部工具/API]
-        LLM --- KnowledgeBase[(知识库)]
-        LLM --- Agents[其他Agent]
+    subgraph 扩展功能["扩展功能"]
+        direction TB
+        Tools["外部工具/API"]
+        KnowledgeBase[(知识库)]
+        Agents["其他Agent"]
     end
     
-    style User fill:#f9f,stroke:#333,stroke-width:2px
-    style 客户端 fill:#d4f4fa,stroke:#333,stroke-width:1px
-    style 服务端 fill:#d5f5d5,stroke:#333,stroke-width:1px
-    style 扩展功能 fill:#faebd7,stroke:#333,stroke-width:1px
+    LLM -.-> Tools
+    LLM -.-> KnowledgeBase
+    LLM -.-> Agents
+    
+    classDef userNode fill:#f9f,stroke:#333,stroke-width:3px,color:#000
+    classDef clientNodes fill:#d4f4fa,stroke:#333,stroke-width:2px,color:#000
+    classDef serverNodes fill:#d5f5d5,stroke:#333,stroke-width:2px,color:#000
+    classDef extensionNodes fill:#faebd7,stroke:#333,stroke-width:1px,color:#000
+    classDef subgraphStyle fill:none,stroke:#999,stroke-width:2px,color:#000,font-weight:bold
+    
+    class User userNode
+    class AudioCapture,AudioPlayback,WSClient,Browser clientNodes
+    class WSServer,ASR,LLM,TTS serverNodes
+    class Tools,KnowledgeBase,Agents extensionNodes
+    class 客户端,服务端,扩展功能 subgraphStyle
 ```
 
 ### 后端架构
