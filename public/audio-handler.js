@@ -1,5 +1,5 @@
 /**
- * Audio recording and processing module
+ * Audio streaming and processing module for conversational AI
  */
 class AudioHandler {
     constructor(websocket) {
@@ -15,10 +15,10 @@ class AudioHandler {
     }
 
     /**
-     * Start audio recording
-     * @returns {Promise<void>}
+     * Start streaming audio for conversation
+     * @returns {Promise<boolean>} Success status
      */
-    async startRecording() {
+    async startStreamingConversation() {
         try {
             if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
                 throw new Error('WebSocket not connected');
@@ -69,12 +69,12 @@ class AudioHandler {
             this.mediaRecorder = {
                 stream,
                 source,
-                stop: () => this.stopRecording()
+                stop: () => this.stopStreamingConversation()
             };
             
             return true;
         } catch (error) {
-            console.error('[Error] Recording error:', error);
+            console.error('[Error] Audio streaming error:', error);
             throw error;
         }
     }
@@ -117,9 +117,9 @@ class AudioHandler {
     }
 
     /**
-     * Stop audio recording
+     * Stop streaming conversation
      */
-    stopRecording() {
+    stopStreamingConversation() {
         if (this.audioSendInterval) {
             clearInterval(this.audioSendInterval);
             this.audioSendInterval = null;

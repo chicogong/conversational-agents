@@ -18,8 +18,8 @@ class ConversationalApp {
         this.audioHandler = null;
         
         // Bind event handlers
-        this.startButton.addEventListener('click', () => this.startRecording());
-        this.stopButton.addEventListener('click', () => this.stopRecording());
+        this.startButton.addEventListener('click', () => this.startConversation());
+        this.stopButton.addEventListener('click', () => this.stopConversation());
         
         // Initialize the app
         this.init();
@@ -53,7 +53,7 @@ class ConversationalApp {
             onClose: () => {
                 this.updateStatus('Disconnected from server');
                 this.disableButtons();
-                this.stopRecording();
+                this.stopConversation();
             },
             onError: (error) => {
                 console.error('[Error] WebSocket error:', error);
@@ -80,7 +80,7 @@ class ConversationalApp {
                     this.audioHandler.handleInterruption();
                 }
                 this.chatManager.hideTypingIndicator();
-                this.updateStatusWithIndicator('Recording...');
+                this.updateStatusWithIndicator('Listening...');
             },
             onServerError: (error) => {
                 this.chatManager.hideTypingIndicator();
@@ -97,37 +97,37 @@ class ConversationalApp {
     }
     
     /**
-     * Start recording
+     * Start streaming conversation
      */
-    async startRecording() {
+    async startConversation() {
         try {
             if (!this.webSocketClient || !this.webSocketClient.isConnected()) {
                 this.updateStatus('Reconnecting to server...');
                 await this.initWebSocket();
             }
             
-            await this.audioHandler.startRecording();
+            await this.audioHandler.startStreamingConversation();
             this.startButton.disabled = true;
             this.stopButton.disabled = false;
-            this.updateStatusWithIndicator('Recording...');
+            this.updateStatusWithIndicator('Listening...');
             this.chatManager.showTypingIndicator();
         } catch (error) {
-            console.error('[Error] Recording error:', error);
+            console.error('[Error] Failed to start conversation:', error);
             this.updateStatus(`Cannot access microphone: ${error.message}`);
         }
     }
     
     /**
-     * Stop recording
+     * Stop streaming conversation
      */
-    stopRecording() {
+    stopConversation() {
         if (this.audioHandler) {
-            this.audioHandler.stopRecording();
+            this.audioHandler.stopStreamingConversation();
         }
         
         this.startButton.disabled = false;
         this.stopButton.disabled = true;
-        this.updateStatus('Recording stopped');
+        this.updateStatus('Conversation stopped');
         this.chatManager.hideTypingIndicator();
     }
     
