@@ -1,6 +1,6 @@
-# 智能语音助手
+# 智能语音对话系统
 
-一个基于WebSocket的实时语音对话系统，集成了语音识别、大语言模型和语音合成功能。
+基于现代Web技术构建的实时语音对话平台，无缝集成语音识别、大语言模型对话和高质量语音合成。
 
 <div align="center">
 
@@ -21,111 +21,81 @@
 
 </div>
 
-## ✨ 功能特点
+## 🔍 概述
+
+本项目实现一个完整的语音对话助手，支持实时语音识别、LLM对话和高质量TTS合成，具有低延迟和高响应性特点。系统采用模块化设计，易于维护和扩展。
+
+**核心特性:**
 
 - 🎤 实时语音识别：支持连续语音识别，自动断句
 - 🤖 智能对话：集成大语言模型，提供智能对话能力
-- 🔊 语音合成：将AI回复转换为自然语音
 - 🚀 实时交互：支持打断和实时响应
-- 🎨 美观界面：现代化的聊天界面设计
-- 📱 响应式设计：适配不同设备屏幕
+- 🔊 语音合成：将AI回复转换为自然语音
+- 📝 会话管理：支持多轮对话历史记录
+- 🔄 可扩展性：易于集成其他AI服务和功能
+- 🌟 低延迟设计，接近自然对话体验
 
-## 🛠️ 技术栈
+## 📋 系统要求
 
-- 前端：HTML5, CSS3, JavaScript, WebSocket, Web Audio API
-- 后端：Node.js, Express
-- 语音识别：Azure Speech Service
-- 大语言模型：OpenAI API
-- 语音合成：Azure Text-to-Speech
+- Node.js 16+ 和 npm/yarn
+- Azure 语音服务账户
+- OpenAI API 账户（或兼容API）
+- 支持WebSocket和AudioContext的浏览器
 
-## 📦 安装与配置
+## 🚀 快速开始
 
-### 环境要求
+### 安装
 
-- Node.js 16+
-- npm 或 yarn
-- Azure Speech Service 订阅
-- OpenAI API 密钥
-
-### 安装步骤
-
-1. 克隆仓库：
 ```bash
-git clone https://github.com/chicogong/conversational-agens.git
-cd conversational-agent
-```
+# 克隆仓库
+git clone https://github.com/chicogong/conversational-agents.git
+cd conversational-agents
 
-2. 安装依赖：
-```bash
+# 安装依赖
 npm install
 ```
 
-3. 配置环境变量：
-创建 `.env` 文件并添加以下配置：
-```env
-# Azure Speech Service
-AZURE_SPEECH_KEY=your_azure_speech_key
-AZURE_SPEECH_REGION=your_azure_region
+### 配置
+
+创建 `.env` 文件并配置以下参数:
+
+```
+# Azure语音服务
+AZURE_SPEECH_KEY=your_key_here
+AZURE_SPEECH_REGION=your_region_here
 
 # OpenAI
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_BASE_URL=https://api.openai.com/v1  # 可选，默认为官方API
-OPENAI_MODEL=gpt-3.5-turbo  # 可选，默认为 gpt-3.5-turbo
+OPENAI_API_KEY=your_openai_key_here
+OPENAI_BASE_URL=https://api.openai.com/v1  # 可选
+OPENAI_MODEL=gpt-3.5-turbo  # 可选
 ```
 
-4. 启动服务：
+### 启动
+
 ```bash
 npm start
 ```
 
-5. 访问应用：
-打开浏览器访问 `http://localhost:8080`
+访问 `http://localhost:8080` 开始使用。
 
-## 🔌 协议设计
+## 🔌 技术架构
 
-### WebSocket 消息格式
+本系统采用模块化设计，主要组件包括:
 
-#### 客户端到服务器
-```json
-{
-  "type": "audio",
-  "data": "Base64编码的音频数据"
-}
-```
+### 后端架构
 
-#### 服务器到客户端
-```json
-// 语音识别结果
-{
-  "type": "transcription",
-  "text": "识别的文本内容"
-}
+- **服务器核心**: Node.js + Express
+- **WebSocket服务**: 用于实时音频传输和双向通信
+- **语音服务**: 集成Azure语音识别和合成
+- **LLM服务**: 接入OpenAI或兼容API，提供对话能力
 
-// LLM响应
-{
-  "type": "llmResponse",
-  "text": "AI回复内容"
-}
+### 前端架构
 
-// TTS音频数据
-{
-  "type": "audioData",
-  "data": "Base64编码的音频数据"
-}
+- **音频捕获**: Web Audio API
+- **实时通信**: WebSocket客户端
+- **用户界面**: 原生JavaScript + 现代CSS
 
-// 中断信号
-{
-  "type": "interrupt"
-}
-
-// 错误信息
-{
-  "type": "error",
-  "message": "错误描述"
-}
-```
-
-### 性能指标
+### 系统性能
 
 - ASR延迟：< 300ms
 - LLM首token延迟：< 300ms
@@ -150,7 +120,125 @@ npm start
 - 多轮对话优化
 - 知识库集成
 
-## 📅 后续计划
+## 🛠️ API规范
+
+### WebSocket消息格式
+
+**客户端到服务器:**
+- 音频数据流
+- 控制命令 (打断、重置等)
+
+**服务器到客户端:**
+- 识别结果(部分/完整)
+- LLM响应内容
+- TTS音频数据
+- 状态信息和错误提示
+
+### 详细通信协议
+
+#### 连接建立
+```
+WebSocket URL: ws://{host}:{port}/speech
+```
+
+#### 客户端消息类型
+1. **音频数据**:
+```json
+{
+  "type": "audio",
+  "format": "audio/webm",
+  "data": "base64编码的音频数据"
+}
+```
+
+2. **控制命令**:
+```json
+{
+  "type": "command",
+  "command": "interrupt" | "reset" | "pause" | "resume"
+}
+```
+
+#### 服务器消息类型
+1. **ASR识别结果**:
+```json
+{
+  "type": "asr_result",
+  "text": "识别文本",
+  "isFinal": true | false
+}
+```
+
+2. **LLM响应**:
+```json
+{
+  "type": "llm_response",
+  "text": "回复文本",
+  "isComplete": true | false
+}
+```
+
+3. **TTS音频**:
+```json
+{
+  "type": "tts_audio",
+  "format": "audio/mp3",
+  "data": "base64编码的音频数据",
+  "isLast": true | false
+}
+```
+
+4. **状态消息**:
+```json
+{
+  "type": "status",
+  "status": "ready" | "processing" | "error",
+  "message": "状态描述或错误信息"
+}
+```
+
+#### 状态码
+- 1000: 正常关闭
+- 1001: 服务重启
+- 1011: 服务器内部错误
+- 4000: 无效的消息格式
+- 4001: 认证失败
+- 4002: 服务限流
+
+## 📊 性能优化
+
+系统针对语音交互场景进行了多项优化:
+
+- 实时语音活动检测
+- 语音识别的断句优化
+- LLM流式响应及句子级TTS合成
+- 打断机制优化
+- 网络连接自动恢复
+
+## 🔄 Docker部署
+
+### 使用Docker Compose运行
+
+```bash
+# 构建并启动容器
+docker-compose up -d
+```
+
+### 手动Docker构建
+
+```bash
+# 构建镜像
+docker build -t conversational-agent .
+
+# 运行容器
+docker run -p 8080:8080 \
+  -e AZURE_SPEECH_KEY=your_key \
+  -e AZURE_SPEECH_REGION=your_region \
+  -e OPENAI_API_KEY=your_key \
+  conversational-agent
+```
+
+## 📅 开发路线图
 
 ### 短期计划
 - [ ] 添加对话历史记录
@@ -163,19 +251,19 @@ npm start
 - [ ] 优化打断速度
 - [ ] 增加Agent状态、会话状态回调
 
-### 中期计划
-- [ ] 添加语音情感识别
-- [ ] 添加用户认证系统
-- [ ] 接入更多的ASR
-- [ ] 接入嵌入式设备ESP32
-- [ ] 优化语音识别准确率
-- [ ] 支持多语言识别、切换
+### 近期计划
+- 多语言支持增强
+- 多模型接入和切换功能
+- 会话历史管理
+- 对话风格定制
+- 工具调用能力
 
-### 长期计划
-- [ ] 支持自定义语音模型
-- [ ] 实现多模态交互
-- [ ] 构建知识图谱
-- [ ] 开发移动端应用
+### 未来展望
+- 自定义语音模型
+- 情感识别与表达
+- 多Agent协作交互
+- 跨平台客户端支持
+- 嵌入式设备支持
 
 ## 🤝 贡献指南
 
@@ -187,80 +275,18 @@ npm start
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 创建 Pull Request
 
-## 📄 许可证
+
+## 📄 许可协议
 
 本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
 
-## 🙏 致谢
-
-- [Azure Speech Service](https://azure.microsoft.com/services/cognitive-services/speech-services/)
-- [OpenAI](https://openai.com/)
-
 ## 📞 联系方式
 
-- 项目维护者：[chicogong](https://github.com/chicogong)
-- 邮箱：chicogong@tencent.com
+- 项目维护: [chicogong](https://github.com/chicogong)
+- 邮箱: chicogong@tencent.com
 
 ---
 
 <div align="center">
   <sub>Built with ❤️ by <a href="https://github.com/chicogong">chicogong</a></sub>
-</div>
-
-## Docker 部署
-
-### 环境变量配置
-
-在运行容器前，需要设置以下环境变量：
-
-```bash
-# Azure 语音服务配置
-AZURE_SPEECH_KEY=your_azure_speech_key
-AZURE_SPEECH_REGION=your_azure_region
-
-# OpenAI API 配置
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_BASE_URL=https://api.openai.com/v1  # 可选，默认为官方API
-OPENAI_MODEL=gpt-3.5-turbo  # 可选，默认为 gpt-3.5-turbo
-```
-
-### 使用 Docker Compose 运行
-
-1. 确保已安装 Docker 和 Docker Compose
-2. 创建 `.env` 文件并设置上述环境变量
-3. 运行以下命令启动服务：
-
-```bash
-docker-compose up -d
-```
-
-### 手动构建和运行 Docker 镜像
-
-```bash
-# 构建镜像
-docker build -t conversational-agent .
-
-# 运行容器
-docker run -p 8080:8080 \
-  -e AZURE_SPEECH_KEY=your_azure_speech_key \
-  -e AZURE_SPEECH_REGION=your_azure_region \
-  -e OPENAI_API_KEY=your_openai_api_key \
-  conversational-agent
-```
-
-## 访问应用
-
-服务启动后，打开浏览器访问：
-
-```
-http://localhost:8080
-```
-
-## 开发环境设置
-
-如果你想在本地开发环境中运行项目：
-
-1. 克隆项目
-2. 安装依赖：`npm install`
-3. 创建 `.env` 文件并添加必要的环境变量
-4. 启动开发服务器：`node server.js` 
+</div> 
