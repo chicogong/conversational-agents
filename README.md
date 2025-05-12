@@ -69,8 +69,8 @@ AZURE_SPEECH_REGION=your_azure_region
 
 # OpenAI
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_BASE_URL=your_openai_base_url
-OPENAI_MODEL=gpt-3.5-turbo
+OPENAI_BASE_URL=https://api.openai.com/v1  # 可选，默认为官方API
+OPENAI_MODEL=gpt-3.5-turbo  # 可选，默认为 gpt-3.5-turbo
 ```
 
 4. 启动服务：
@@ -205,4 +205,62 @@ npm start
 
 <div align="center">
   <sub>Built with ❤️ by <a href="https://github.com/chicogong">chicogong</a></sub>
-</div> 
+</div>
+
+## Docker 部署
+
+### 环境变量配置
+
+在运行容器前，需要设置以下环境变量：
+
+```bash
+# Azure 语音服务配置
+AZURE_SPEECH_KEY=your_azure_speech_key
+AZURE_SPEECH_REGION=your_azure_region
+
+# OpenAI API 配置
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_BASE_URL=https://api.openai.com/v1  # 可选，默认为官方API
+OPENAI_MODEL=gpt-3.5-turbo  # 可选，默认为 gpt-3.5-turbo
+```
+
+### 使用 Docker Compose 运行
+
+1. 确保已安装 Docker 和 Docker Compose
+2. 创建 `.env` 文件并设置上述环境变量
+3. 运行以下命令启动服务：
+
+```bash
+docker-compose up -d
+```
+
+### 手动构建和运行 Docker 镜像
+
+```bash
+# 构建镜像
+docker build -t conversational-agent .
+
+# 运行容器
+docker run -p 8080:8080 \
+  -e AZURE_SPEECH_KEY=your_azure_speech_key \
+  -e AZURE_SPEECH_REGION=your_azure_region \
+  -e OPENAI_API_KEY=your_openai_api_key \
+  conversational-agent
+```
+
+## 访问应用
+
+服务启动后，打开浏览器访问：
+
+```
+http://localhost:8080
+```
+
+## 开发环境设置
+
+如果你想在本地开发环境中运行项目：
+
+1. 克隆项目
+2. 安装依赖：`npm install`
+3. 创建 `.env` 文件并添加必要的环境变量
+4. 启动开发服务器：`node server.js` 
