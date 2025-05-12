@@ -91,7 +91,7 @@ flowchart TB
     
     subgraph 客户端["客户端"]
         direction TB
-        Browser --> AudioCapture["音频捕获\nWeb Audio API"]
+        Browser --> AudioCapture["音频捕获<br>Web Audio API"]
         AudioPlayback["音频播放"] --> Browser
         AudioCapture ==> WSClient["WebSocket 客户端"]
         WSClient ==> AudioPlayback
@@ -99,9 +99,9 @@ flowchart TB
     
     subgraph 服务端["服务端"]
         direction TB
-        WSServer["WebSocket 服务"] ==> ASR["语音识别模块\nAzure Speech"]
-        ASR ==> LLM["大语言模型\nOpenAI/GPT"]
-        LLM ==> TTS["语音合成模块\nAzure TTS"]
+        WSServer["WebSocket 服务"] ==> ASR["语音识别模块<br>Azure Speech"]
+        ASR ==> LLM["大语言模型<br>OpenAI/GPT"]
+        LLM ==> TTS["语音合成模块<br>Azure TTS"]
         TTS ==> WSServer
     end
     
