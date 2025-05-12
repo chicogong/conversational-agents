@@ -77,6 +77,20 @@ async function callLLM(text, ws) {
             console.log('[LLM] 取消之前的LLM请求');
         }
 
+        // 确保清除之前队列中的所有TTS请求
+        if (ws.ttsPendingSentences) {
+            ws.ttsPendingSentences.length = 0;
+        } else {
+            ws.ttsPendingSentences = [];
+        }
+
+        // 取消当前正在进行的TTS
+        if (ws.currentSynthesizer) {
+            console.log('[TTS] 取消之前的TTS合成');
+            ws.currentSynthesizer.close();
+            ws.currentSynthesizer = null;
+        }
+        
         const stream = await openai.chat.completions.create({
             model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
             messages: [
@@ -123,8 +137,14 @@ async function callLLM(text, ws) {
                 
                 // 检查是否遇到句子结束的标点符号
                 if (/[！。？：，]/.test(content)) {
-                    // 对当前句子进行TTS
-                    await textToSpeech(currentSentence, ws);
+                    // 将当前句子添加到待处理队列
+                    const sentenceToProcess = currentSentence;
+                    ws.ttsPendingSentences.push(sentenceToProcess);
+                    
+                    // 如果这是队列中的第一个句子，立即开始处理
+                    if (ws.ttsPendingSentences.length === 1 && !ws.processingTTS) {
+                        processNextTTS(ws);
+                    }
                     
                     // 清空当前句子
                     currentSentence = '';
@@ -134,7 +154,10 @@ async function callLLM(text, ws) {
         
         // 处理最后一个不完整的句子
         if (currentSentence.trim()) {
-            await textToSpeech(currentSentence, ws);
+            ws.ttsPendingSentences.push(currentSentence);
+            if (ws.ttsPendingSentences.length === 1 && !ws.processingTTS) {
+                processNextTTS(ws);
+            }
         }
 
         // 清除stream引用
@@ -148,6 +171,45 @@ async function callLLM(text, ws) {
         ws.send(JSON.stringify({
             error: '调用大模型时出错'
         }));
+    }
+}
+
+/**
+ * 处理下一个TTS请求
+ * @param {WebSocket} ws - WebSocket连接实例
+ */
+async function processNextTTS(ws) {
+    // 如果队列为空或已经被中断，则退出
+    if (!ws.ttsPendingSentences || ws.ttsPendingSentences.length === 0 || !ws.llmStream) {
+        ws.processingTTS = false;
+        return;
+    }
+    
+    ws.processingTTS = true;
+    const text = ws.ttsPendingSentences[0];
+    
+    try {
+        await textToSpeech(text, ws);
+        
+        // 处理完成后，从队列中移除
+        if (ws.ttsPendingSentences && ws.ttsPendingSentences.length > 0) {
+            ws.ttsPendingSentences.shift();
+        }
+        
+        // 处理下一个句子
+        if (ws.ttsPendingSentences && ws.ttsPendingSentences.length > 0) {
+            processNextTTS(ws);
+        } else {
+            ws.processingTTS = false;
+        }
+    } catch (error) {
+        console.error('[错误] 处理TTS队列错误:', error);
+        ws.processingTTS = false;
+        
+        // 出错时清空队列，避免卡死
+        if (ws.ttsPendingSentences) {
+            ws.ttsPendingSentences.length = 0;
+        }
     }
 }
 
@@ -193,6 +255,7 @@ async function textToSpeech(text, ws) {
             );
         });
 
+        // 检查合成是否被取消
         if (!ws.currentSynthesizer) {
             console.log('[TTS] 合成被取消');
             return;
@@ -240,6 +303,10 @@ wss.on('connection', async (ws) => {
     let audioBuffers = [];
     let audioDataReceived = false;
     
+    // 初始化TTS处理队列
+    ws.ttsPendingSentences = [];
+    ws.processingTTS = false;
+
     // 尝试解析Opus帧的函数
     async function tryExtractOpusFrames(data) {
         try {
@@ -368,6 +435,11 @@ wss.on('connection', async (ws) => {
                             ws.currentSynthesizer.close();
                             ws.currentSynthesizer = null;
                         }
+                        // 清空TTS队列
+                        if (ws.ttsPendingSentences) {
+                            ws.ttsPendingSentences.length = 0;
+                        }
+                        ws.processingTTS = false;
                         // 发送中断信号到前端
                         ws.send(JSON.stringify({
                             interrupt: true
@@ -470,11 +542,15 @@ wss.on('connection', async (ws) => {
                 error => console.error('[错误] 停止识别错误:', error)
             );
         }
-        // 清理TTS资源
+        // 清理TTS资源和队列
         if (ws.currentSynthesizer) {
             ws.currentSynthesizer.close();
             ws.currentSynthesizer = null;
         }
+        if (ws.ttsPendingSentences) {
+            ws.ttsPendingSentences.length = 0;
+        }
+        ws.processingTTS = false;
     });
 
     ws.on('error', (error) => {
@@ -483,8 +559,12 @@ wss.on('connection', async (ws) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log(`[服务器] 服务器运行在 http://localhost:${PORT}`);
+const HOST = process.env.HOST || 'localhost';
+
+// 使用同一个HTTP服务器运行WebSocket和HTTP服务
+server.listen(PORT, HOST, () => {
+    console.log(`[服务器] 服务器运行在 http://${HOST}:${PORT}`);
+    console.log('[服务器] WebSocket服务已启用在同一端口');
     console.log('[服务器] Azure语音识别服务已启用');
     console.log('[服务器] 使用的区域:', process.env.AZURE_SPEECH_REGION);
 });
