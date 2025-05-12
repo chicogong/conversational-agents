@@ -11,6 +11,8 @@ class ConversationalApp {
         this.startButton = document.getElementById('startButton');
         this.stopButton = document.getElementById('stopButton');
         this.statusElement = document.getElementById('status');
+        this.chatContainer = document.getElementById('chatContainer');
+        this.welcomeMessage = document.querySelector('.welcome-message');
         
         // Initialize managers
         this.chatManager = new ChatManager('chatContainer');
@@ -29,7 +31,7 @@ class ConversationalApp {
      * Initialize the application
      */
     async init() {
-        this.updateStatus('Connecting to server...');
+        this.updateStatus('连接中...');
         this.disableButtons();
         
         try {
@@ -37,7 +39,7 @@ class ConversationalApp {
             this.enableStartButton();
         } catch (error) {
             console.error('[Error] Failed to initialize:', error);
-            this.updateStatus('Connection failed. Please refresh the page.');
+            this.updateStatus('连接失败，请刷新页面重试');
         }
     }
     
@@ -47,17 +49,17 @@ class ConversationalApp {
     async initWebSocket() {
         this.webSocketClient = new WebSocketClient({
             onOpen: () => {
-                this.updateStatus('Connected to server');
+                this.updateStatus('已连接');
                 this.enableStartButton();
             },
             onClose: () => {
-                this.updateStatus('Disconnected from server');
+                this.updateStatus('已断开连接');
                 this.disableButtons();
                 this.stopConversation();
             },
             onError: (error) => {
                 console.error('[Error] WebSocket error:', error);
-                this.updateStatus('WebSocket error, please refresh the page');
+                this.updateStatus('连接错误，请刷新页面');
                 this.disableButtons();
             },
             onAudioData: (data) => {
@@ -66,9 +68,11 @@ class ConversationalApp {
                 }
             },
             onTranscription: (text) => {
+                this.hideWelcomeMessage();
                 this.chatManager.handleFinalTranscription(text);
             },
             onPartialTranscription: (text) => {
+                this.hideWelcomeMessage();
                 this.chatManager.handlePartialTranscription(text);
             },
             onAIResponse: (text) => {
@@ -80,11 +84,11 @@ class ConversationalApp {
                     this.audioHandler.handleInterruption();
                 }
                 this.chatManager.hideTypingIndicator();
-                this.updateStatusWithIndicator('Listening...');
+                this.updateStatusWithIndicator('正在聆听...');
             },
             onServerError: (error) => {
                 this.chatManager.hideTypingIndicator();
-                this.chatManager.handleAIResponse(`Error: ${error}`);
+                this.chatManager.handleAIResponse(`错误: ${error}`);
                 console.error('[Server Error]', error);
             },
             onServerStatus: (message) => {
@@ -97,23 +101,33 @@ class ConversationalApp {
     }
     
     /**
+     * Hide welcome message when conversation starts
+     */
+    hideWelcomeMessage() {
+        if (this.welcomeMessage && this.welcomeMessage.parentNode) {
+            this.welcomeMessage.style.display = 'none';
+        }
+    }
+    
+    /**
      * Start streaming conversation
      */
     async startConversation() {
         try {
             if (!this.webSocketClient || !this.webSocketClient.isConnected()) {
-                this.updateStatus('Reconnecting to server...');
+                this.updateStatus('重新连接中...');
                 await this.initWebSocket();
             }
             
             await this.audioHandler.startStreamingConversation();
             this.startButton.disabled = true;
             this.stopButton.disabled = false;
-            this.updateStatusWithIndicator('Listening...');
+            this.updateStatusWithIndicator('正在聆听...');
             this.chatManager.showTypingIndicator();
+            this.hideWelcomeMessage();
         } catch (error) {
             console.error('[Error] Failed to start conversation:', error);
-            this.updateStatus(`Cannot access microphone: ${error.message}`);
+            this.updateStatus(`无法访问麦克风: ${error.message}`);
         }
     }
     
@@ -127,7 +141,7 @@ class ConversationalApp {
         
         this.startButton.disabled = false;
         this.stopButton.disabled = true;
-        this.updateStatus('Conversation stopped');
+        this.updateStatus('对话已结束');
         this.chatManager.hideTypingIndicator();
     }
     

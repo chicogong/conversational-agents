@@ -30,16 +30,6 @@ const speechConfig = sdk.SpeechConfig.fromSubscription(
     process.env.AZURE_SPEECH_REGION
 );
 speechConfig.speechRecognitionLanguage = 'zh-CN';
-// 恢复较长的超时设置以适应WebM格式
-// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "5000");
-// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500");
-// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true");
-// // 设置更积极的识别模式
-// speechConfig.setProperty(sdk.PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText");
-// // 启用语言检测
-// speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_AutoDetectSourceLanguages, "zh-CN");
-// // 启用混合识别
-// speechConfig.enableAudioLogging();
 console.log('[初始化] Azure语音服务配置完成');
 
 /**
@@ -306,6 +296,8 @@ wss.on('connection', async (ws) => {
 
     /**
      * 处理音频数据
+     * @param {ArrayBuffer} data - 接收到的音频数据
+     * @returns {boolean} 处理是否成功
      */
     async function processAudioData(data) {
         try {
@@ -421,7 +413,7 @@ wss.on('connection', async (ws) => {
     /**
      * 清理资源
      */
-    async function cleanup() {
+    async function cleanupResources() {
         try {
             if (recognizer) {
                 await new Promise((resolve, reject) => {
@@ -474,7 +466,7 @@ wss.on('connection', async (ws) => {
         // 处理连接关闭
         ws.on('close', async () => {
             console.log('[WebSocket] 连接关闭');
-            await cleanup();
+            await cleanupResources();
         });
 
         // 处理错误

@@ -43,11 +43,27 @@ class ChatManager {
                 messageDiv.classList.add('partial-message');
             }
             
+            // Add avatar if it's an AI message
+            if (!isUser) {
+                const avatarDiv = document.createElement('div');
+                avatarDiv.className = 'message-avatar';
+                avatarDiv.innerHTML = '<i class="fas fa-robot"></i>';
+                messageDiv.appendChild(avatarDiv);
+            }
+            
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
             contentDiv.textContent = text;
             
             messageDiv.appendChild(contentDiv);
+            
+            // Add timestamp
+            const timestampDiv = document.createElement('div');
+            timestampDiv.className = 'message-timestamp';
+            const now = new Date();
+            timestampDiv.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+            messageDiv.appendChild(timestampDiv);
+            
             this.chatContainer.appendChild(messageDiv);
         } else {
             // Update existing message
