@@ -82,6 +82,41 @@ npm start
 
 本系统采用模块化设计，主要组件包括:
 
+### 系统架构图
+
+```mermaid
+graph TD
+    User((用户)) --- Browser[浏览器]
+    
+    subgraph 客户端
+        Browser --> AudioCapture[音频捕获\nWeb Audio API]
+        Browser <-- AudioPlayback[音频播放]
+        AudioCapture --> WSClient[WebSocket 客户端]
+        WSClient --> AudioPlayback
+    end
+    
+    subgraph 服务端
+        WSClient <---> WSServer[WebSocket 服务]
+        WSServer --> ASR[语音识别模块\nAzure Speech]
+        ASR --> LLM[大语言模型\nOpenAI/GPT]
+        LLM --> TTS[语音合成模块\nAzure TTS]
+        TTS --> WSServer
+    end
+    
+    AudioPlayback --> User
+    
+    subgraph 扩展功能
+        LLM --- Tools[外部工具/API]
+        LLM --- KnowledgeBase[(知识库)]
+        LLM --- Agents[其他Agent]
+    end
+    
+    style User fill:#f9f,stroke:#333,stroke-width:2px
+    style 客户端 fill:#d4f4fa,stroke:#333,stroke-width:1px
+    style 服务端 fill:#d5f5d5,stroke:#333,stroke-width:1px
+    style 扩展功能 fill:#faebd7,stroke:#333,stroke-width:1px
+```
+
 ### 后端架构
 
 - **服务器核心**: Node.js + Express
