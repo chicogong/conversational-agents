@@ -70,6 +70,8 @@ OPENAI_BASE_URL=https://api.openai.com/v1  # 可选
 OPENAI_MODEL=gpt-3.5-turbo  # 可选
 ```
 
+参考 `env.example` 文件可以查看所有可配置的环境变量。
+
 ### 启动
 
 ```bash
@@ -340,4 +342,4 @@ docker run -p 8080:8080 \
 
 <div align="center">
   <sub>Built with ❤️ by <a href="https://github.com/chicogong">chicogong</a></sub>
-</div> 
+</div>

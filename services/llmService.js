@@ -3,46 +3,67 @@ import config from '../config.js';
 import { textToSpeech } from './speechService.js';
 import logger from './logger.js';
 
-// OpenAI API 客户端
+// Initialize OpenAI API client
 const openai = new OpenAI({
   apiKey: config.openai.apiKey,
   baseURL: config.openai.baseURL
 });
 
+// Default conversation history size
+const MAX_CONVERSATION_HISTORY = 10;
+
 /**
- * 取消当前进行中的所有活动
+ * Cancel all ongoing activities for a connection
+ * @param {WebSocket} ws - WebSocket connection
+ * @param {boolean} sendInterrupt - Whether to send interrupt signal to client
  */
 export function cancelOngoingActivities(ws, sendInterrupt = true) {
-  // 取消LLM
+  // Cancel LLM stream
   if (ws.llmStream) {
-    ws.llmStream.controller.abort();
+    try {
+      ws.llmStream.controller.abort();
+    } catch (error) {
+      logger.error(`[${ws.connectionId}] Error aborting LLM stream:`, error);
+    }
     ws.llmStream = null;
   }
   
-  // 取消TTS
+  // Cancel TTS
   if (ws.currentSynthesizer) {
-    ws.currentSynthesizer.close();
+    try {
+      ws.currentSynthesizer.close();
+    } catch (error) {
+      logger.error(`[${ws.connectionId}] Error closing synthesizer:`, error);
+    }
     ws.currentSynthesizer = null;
   }
   
-  // 清空TTS队列
+  // Clear TTS queue
   if (ws.ttsPendingSentences) {
     ws.ttsPendingSentences.length = 0;
   }
   ws.processingTTS = false;
   
-  // 发送中断信号
-  if (sendInterrupt) {
-    ws.send(JSON.stringify({ interrupt: true }));
+  // Send interrupt signal to client
+  if (sendInterrupt && ws.connectionActive) {
+    try {
+      ws.send(JSON.stringify({ interrupt: true }));
+    } catch (error) {
+      logger.error(`[${ws.connectionId}] Error sending interrupt signal:`, error);
+    }
   }
 }
 
 /**
- * 处理下一个TTS请求
+ * Process next TTS request in queue
+ * @param {WebSocket} ws - WebSocket connection
  */
 export async function processNextTTS(ws) {
-  // 如果队列为空或已经被中断，则退出
-  if (!ws.ttsPendingSentences || ws.ttsPendingSentences.length === 0 || !ws.llmStream) {
+  // Exit if queue is empty or connection was interrupted
+  if (!ws.ttsPendingSentences || 
+      ws.ttsPendingSentences.length === 0 || 
+      !ws.llmStream || 
+      !ws.connectionActive) {
     ws.processingTTS = false;
     return;
   }
@@ -51,80 +72,145 @@ export async function processNextTTS(ws) {
   const text = ws.ttsPendingSentences[0];
   
   try {
+    logger.speech.debug(`[${ws.connectionId}] Processing TTS for text: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
     await textToSpeech(text, ws);
     
-    // 移除已处理的句子
+    // Remove processed sentence
     ws.ttsPendingSentences.shift();
     
-    // 处理下一个句子
-    if (ws.ttsPendingSentences.length > 0) {
+    // Process next sentence
+    if (ws.ttsPendingSentences.length > 0 && ws.connectionActive) {
       processNextTTS(ws);
     } else {
       ws.processingTTS = false;
     }
   } catch (error) {
-    logger.error('[错误] 处理TTS队列错误:', error);
+    logger.error(`[${ws.connectionId}] Error processing TTS queue:`, error);
     ws.processingTTS = false;
-    ws.ttsPendingSentences.length = 0; // 出错时清空队列，避免卡死
+    ws.ttsPendingSentences.length = 0; // Clear queue on error to avoid deadlock
+    
+    // Attempt to send error to client
+    if (ws.connectionActive) {
+      try {
+        ws.send(JSON.stringify({ error: 'TTS processing error', details: error.message }));
+      } catch (sendError) {
+        logger.error(`[${ws.connectionId}] Error sending TTS error to client:`, sendError);
+      }
+    }
   }
 }
 
 /**
- * 调用大语言模型处理用户输入
+ * Initialize conversation history for a connection
+ * @param {WebSocket} ws - WebSocket connection
+ */
+function initConversationHistory(ws) {
+  if (!ws.conversationHistory) {
+    ws.conversationHistory = [{
+      role: "system",
+      content: "You are an intelligent voice assistant named Xiao Rui. Please respond in a conversational, concise way. Avoid using emoji or special characters."
+    }];
+  }
+}
+
+/**
+ * Add message to conversation history
+ * @param {WebSocket} ws - WebSocket connection
+ * @param {string} role - Message role (user/assistant)
+ * @param {string} content - Message content
+ */
+function addToConversationHistory(ws, role, content) {
+  initConversationHistory(ws);
+  
+  ws.conversationHistory.push({
+    role: role,
+    content: content
+  });
+  
+  // Maintain maximum history size
+  if (ws.conversationHistory.length > MAX_CONVERSATION_HISTORY + 1) { // +1 for system message
+    // Remove the oldest non-system message
+    ws.conversationHistory.splice(1, 1);
+  }
+}
+
+/**
+ * Safely send data to client
+ * @param {WebSocket} ws - WebSocket connection
+ * @param {Object} data - Data to send
+ */
+function sendToClient(ws, data) {
+  if (!ws.connectionActive) return;
+  
+  try {
+    ws.send(JSON.stringify(data));
+  } catch (error) {
+    logger.error(`[${ws.connectionId}] Error sending data to client:`, error);
+  }
+}
+
+/**
+ * Call language model to process user input
+ * @param {string} text - User input text
+ * @param {WebSocket} ws - WebSocket connection
  */
 export async function callLLM(text, ws) {
+  // Track performance
+  const startTime = Date.now();
+  let llmFirstTokenTime = null;
+  
   try {
-    const startTime = Date.now();
-    let llmFirstTokenTime = null;
+    logger.llm.info(`[${ws.connectionId}] Processing user query: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
     
-    // 取消所有进行中的活动
+    // Cancel ongoing activities
     cancelOngoingActivities(ws, false);
     
+    // Initialize and update conversation history
+    initConversationHistory(ws);
+    addToConversationHistory(ws, "user", text);
+    
+    // Create messages array from conversation history
+    const messages = [...ws.conversationHistory];
+    
+    // Call OpenAI API with streaming response
     const stream = await openai.chat.completions.create({
       model: config.openai.model,
-      messages: [
-        {
-          role: "system",
-          content: "你是一个智能语音助手小蕊，请用口语化、简短的回答客户问题，不要回复任何表情符号"
-        },
-        {
-          role: "user",
-          content: text
-        }
-      ],
-      stream: true
+      messages: messages,
+      stream: true,
+      temperature: 0.7,
+      max_tokens: 300,
     });
 
-    // 保存stream引用以便后续取消
+    // Save stream reference for potential cancellation
     ws.llmStream = stream;
 
     let fullResponse = '';
     let currentSentence = '';
     
     for await (const chunk of stream) {
-      // 检查是否被取消
-      if (!ws.llmStream) {
-        logger.info('[LLM] 响应被取消');
+      // Check if response was cancelled
+      if (!ws.llmStream || !ws.connectionActive) {
+        logger.llm.info(`[${ws.connectionId}] LLM response cancelled`);
         return;
       }
 
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
-        // 记录第一个token的时间
+        // Record first token time
         if (!llmFirstTokenTime) {
           llmFirstTokenTime = Date.now();
-          logger.info(`[性能] LLM首token耗时: ${llmFirstTokenTime - startTime}ms`);
+          logger.llm.info(`[${ws.connectionId}] LLM first token latency: ${llmFirstTokenTime - startTime}ms`);
         }
 
         fullResponse += content;
         currentSentence += content;
         
-        // 更新前端显示的完整响应
-        ws.send(JSON.stringify({ llmResponse: fullResponse }));
+        // Update complete response on frontend
+        sendToClient(ws, { llmResponse: fullResponse });
         
-        // 检查是否遇到句子结束的标点符号
+        // Check for sentence end punctuation
         if (config.patterns.sentenceEnd.test(content)) {
-          // 添加句子到TTS队列并处理
+          // Add sentence to TTS queue and process
           ws.ttsPendingSentences.push(currentSentence);
           if (ws.ttsPendingSentences.length === 1 && !ws.processingTTS) {
             processNextTTS(ws);
@@ -134,7 +220,7 @@ export async function callLLM(text, ws) {
       }
     }
     
-    // 处理最后一个不完整的句子
+    // Handle last incomplete sentence
     if (currentSentence.trim()) {
       ws.ttsPendingSentences.push(currentSentence);
       if (ws.ttsPendingSentences.length === 1 && !ws.processingTTS) {
@@ -142,14 +228,52 @@ export async function callLLM(text, ws) {
       }
     }
 
-    // 清除stream引用
+    // Save assistant response to conversation history
+    if (fullResponse) {
+      addToConversationHistory(ws, "assistant", fullResponse);
+    }
+
+    // Clear stream reference
     ws.llmStream = null;
+    
+    logger.llm.info(`[${ws.connectionId}] LLM response completed in ${Date.now() - startTime}ms`);
   } catch (error) {
     if (error.name === 'AbortError') {
-      logger.info('[LLM] 响应被取消');
+      logger.llm.info(`[${ws.connectionId}] LLM response cancelled`);
       return;
     }
-    logger.error('[错误] 调用LLM出错:', error);
-    ws.send(JSON.stringify({ error: '调用大模型时出错' }));
+    
+    logger.error(`[${ws.connectionId}] Error calling LLM:`, error);
+    
+    if (ws.connectionActive) {
+      sendToClient(ws, { 
+        error: 'Error calling language model',
+        details: process.env.NODE_ENV === 'development' ? error.message : 'Service unavailable'
+      });
+    }
+  }
+}
+
+/**
+ * Get conversation history for a connection
+ * @param {WebSocket} ws - WebSocket connection
+ * @returns {Array} Conversation history
+ */
+export function getConversationHistory(ws) {
+  initConversationHistory(ws);
+  return ws.conversationHistory;
+}
+
+/**
+ * Clear conversation history for a connection
+ * @param {WebSocket} ws - WebSocket connection
+ */
+export function clearConversationHistory(ws) {
+  // Keep system message
+  const systemMessage = ws.conversationHistory?.[0];
+  ws.conversationHistory = systemMessage ? [systemMessage] : null;
+  
+  if (ws.connectionActive) {
+    sendToClient(ws, { conversationCleared: true });
   }
 } 

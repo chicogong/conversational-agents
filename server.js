@@ -7,38 +7,73 @@ import config from './config.js';
 import { handleConnection } from './services/wsHandler.js';
 import logger from './services/logger.js';
 
-// 设置目录路径
+// Set up directory paths
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Express和WebSocket设置
+// Initialize Express application and create HTTP server
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// 静态文件服务
+// Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 处理WebSocket连接
+// Handle WebSocket connections
 wss.on('connection', handleConnection);
 
-// 优雅关闭
-process.on('SIGINT', async () => {
-  logger.info('接收到中断信号，正在关闭服务...');
+// Handle shutdown signals gracefully
+const gracefulShutdown = async (signal) => {
+  logger.info(`Received ${signal} signal, shutting down services...`);
+  
+  // Close WebSocket server
+  wss.close(() => {
+    logger.info('WebSocket server closed');
+  });
+  
+  // Shutdown logger and other services
   await logger.shutdown();
+  
+  // Exit process
   process.exit(0);
+};
+
+// Register shutdown handlers
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception:', error);
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
-process.on('SIGTERM', async () => {
-  logger.info('接收到终止信号，正在关闭服务...');
-  await logger.shutdown();
-  process.exit(0);
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled promise rejection:', reason);
+  gracefulShutdown('UNHANDLED_REJECTION');
 });
 
-// 启动服务器
-server.listen(config.server.port, config.server.host, () => {
-  logger.info(`服务器运行在 http://${config.server.host}:${config.server.port}`);
-  logger.info('WebSocket服务已启用在同一端口');
-  logger.info('Azure语音识别服务已启用');
-  logger.info(`使用的区域: ${config.speech.region}`);
+// Start the server
+const startServer = () => {
+  return new Promise((resolve, reject) => {
+    server.listen(config.server.port, config.server.host, () => {
+      logger.info(`Server running at http://${config.server.host}:${config.server.port}`);
+      logger.info('WebSocket service enabled on the same port');
+      logger.info('Azure Speech Recognition service enabled');
+      logger.info(`Using region: ${config.speech.region}`);
+      resolve();
+    });
+    
+    server.on('error', (error) => {
+      logger.error('Server error:', error);
+      reject(error);
+    });
+  });
+};
+
+// Start the server and catch any errors
+startServer().catch((error) => {
+  logger.error('Failed to start server:', error);
+  process.exit(1);
 });

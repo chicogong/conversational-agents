@@ -3,24 +3,36 @@ import { createSpeechConfig, detectVoiceActivity } from './speechService.js';
 import { callLLM, cancelOngoingActivities } from './llmService.js';
 import logger from './logger.js';
 
+// Track active connections for monitoring
+const activeConnections = new Set();
+
 /**
- * 处理新的WebSocket连接
+ * Handles a new WebSocket connection
  */
 export function handleConnection(ws) {
-  logger.info('[WebSocket] 新的WebSocket连接');
+  logger.ws.info('New WebSocket connection established');
+  
+  // Add to active connections
+  activeConnections.add(ws);
+  logger.ws.debug(`Active connections: ${activeConnections.size}`);
+  
+  // Speech recognition resources
   let pushStream = null;
   let audioConfig = null;
   let recognizer = null;
   let audioDataReceived = false;
   
-  // 初始化客户端状态
+  // Initialize client state
   ws.ttsPendingSentences = [];
   ws.processingTTS = false;
   ws.isUserSpeaking = false;
-  ws.connectionActive = true; // 标记连接是否活跃
+  ws.connectionActive = true;
+  ws.connectionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
 
   /**
-   * 处理音频数据
+   * Process incoming audio data
+   * @param {Buffer} data - Audio data buffer
+   * @returns {boolean} - Whether processing was successful
    */
   async function processAudioData(data) {
     try {
@@ -28,133 +40,137 @@ export function handleConnection(ws) {
       
       const buffer = Buffer.from(data);
       
-      // 确保是有效的PCM数据
+      // Ensure valid PCM data
       if (buffer.length >= 2 && buffer.length % 2 === 0) {
-        // 检测声音活动
+        // Check for voice activity
         const hasVoiceActivity = detectVoiceActivity(buffer);
         if (hasVoiceActivity && !ws.isUserSpeaking) {
-          logger.debug('[语音识别] 检测到用户开始说话');
+          logger.speech.debug(`[${ws.connectionId}] Voice activity detected`);
           ws.isUserSpeaking = true;
           
-          // 中断当前响应
+          // Interrupt current response
           cancelOngoingActivities(ws);
         }
         
-        // 发送数据到语音识别服务
+        // Send data to speech recognition service
         if (pushStream) {
           pushStream.write(buffer);
           return true;
         }
       } else {
-        logger.warn('[语音识别] 无效的音频格式，长度:', buffer.length);
+        logger.speech.warn(`[${ws.connectionId}] Invalid audio format, length: ${buffer.length}`);
       }
       return false;
     } catch (error) {
-      logger.error('[错误] 处理音频数据时出错:', error);
+      logger.error(`[${ws.connectionId}] Error processing audio data:`, error);
       return false;
     }
   }
 
   /**
-   * 设置语音识别器
+   * Set up speech recognizer
    */
   async function setupRecognizer() {
-    logger.info('[语音识别] 正在设置语音识别器...');
+    logger.speech.info(`[${ws.connectionId}] Setting up speech recognizer...`);
     try {
-      // 创建音频流和识别器
+      // Create audio stream and recognizer
       const pushFormat = sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1);
       pushStream = sdk.AudioInputStream.createPushStream(pushFormat);
       audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
       recognizer = new sdk.SpeechRecognizer(createSpeechConfig(), audioConfig);
       
-      logger.info('[语音识别] 成功创建语音识别器和音频流');
+      logger.speech.info(`[${ws.connectionId}] Successfully created speech recognizer and audio stream`);
 
-      // 配置识别事件处理
+      // Configure recognition event handlers
       recognizer.recognizing = (s, e) => {
         if (e.result.text && ws.connectionActive) {
-          logger.debug('[语音识别] 正在识别:', e.result.text);
+          logger.speech.debug(`[${ws.connectionId}] Recognizing: ${e.result.text}`);
           
-          // 中断当前AI响应
+          // Interrupt current AI response
           cancelOngoingActivities(ws);
           
-          // 发送中间结果
-          ws.send(JSON.stringify({ partialTranscription: e.result.text }));
+          // Send intermediate results
+          sendToClient({ partialTranscription: e.result.text });
         }
       };
 
       recognizer.recognized = (s, e) => {
         if (e.result.text && ws.connectionActive) {
-          logger.info('[语音识别] 识别结果:', e.result.text);
+          logger.speech.info(`[${ws.connectionId}] Recognition result: ${e.result.text}`);
           
-          // 取消进行中的响应
+          // Cancel ongoing responses
           cancelOngoingActivities(ws);
           
-          // 发送最终识别结果
-          ws.send(JSON.stringify({ transcription: e.result.text }));
+          // Send final recognition result
+          sendToClient({ transcription: e.result.text });
           
-          // 调用大模型
+          // Call language model
           callLLM(e.result.text, ws);
         } else {
-          logger.debug('[语音识别] 识别完成但没有文本结果');
+          logger.speech.debug(`[${ws.connectionId}] Recognition completed but no text result`);
         }
       };
 
       recognizer.sessionStarted = () => {
-        logger.info('[语音识别] 识别会话开始');
+        logger.speech.info(`[${ws.connectionId}] Recognition session started`);
         ws.isUserSpeaking = true;
       };
 
       recognizer.sessionStopped = () => {
-        logger.info('[语音识别] 识别会话结束');
+        logger.speech.info(`[${ws.connectionId}] Recognition session ended`);
         ws.isUserSpeaking = false;
       };
 
       recognizer.canceled = (s, e) => {
-        logger.error('[语音识别] 取消原因:', e.errorDetails);
+        logger.speech.error(`[${ws.connectionId}] Recognition canceled: ${e.errorDetails}`);
       };
 
-      // 开始连续识别
+      // Start continuous recognition with timeout
       await new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
-          reject(new Error("启动语音识别超时"));
+          reject(new Error("Speech recognition startup timeout"));
         }, 5000);
         
         recognizer.startContinuousRecognitionAsync(
           () => {
             clearTimeout(timeoutId);
-            logger.info('[语音识别] 开始连续识别');
+            logger.speech.info(`[${ws.connectionId}] Continuous recognition started`);
             resolve();
           },
           error => {
             clearTimeout(timeoutId);
-            logger.error('[错误] 识别错误:', error);
+            logger.error(`[${ws.connectionId}] Recognition error:`, error);
             reject(error);
           }
         );
       });
     } catch (error) {
-      logger.error('[错误] 设置语音识别器时出错:', error);
-      if (ws.connectionActive) {
-        ws.send(JSON.stringify({ error: '设置语音识别器失败: ' + error.message }));
-      }
+      logger.error(`[${ws.connectionId}] Error setting up speech recognizer:`, error);
+      sendToClient({ error: `Failed to set up speech recognizer: ${error.message}` });
       throw error;
     }
   }
 
   /**
-   * 清理资源
+   * Clean up resources
    */
   async function cleanupResources() {
     try {
-      // 标记连接已关闭
+      // Mark connection as closed
       ws.connectionActive = false;
       
+      // Remove from active connections
+      activeConnections.delete(ws);
+      logger.ws.debug(`Connection closed. Active connections: ${activeConnections.size}`);
+      
       if (recognizer) {
-        await new Promise((resolve, reject) => {
+        await new Promise((resolve) => {
           const timeoutId = setTimeout(() => {
-            logger.warn('[语音识别] 停止识别超时，强制关闭');
+            logger.speech.warn(`[${ws.connectionId}] Stop recognition timeout, forcing close`);
             if (recognizer) {
-              try { recognizer.close(); } catch (e) { }
+              try { recognizer.close(); } catch (e) { 
+                logger.error(`[${ws.connectionId}] Error closing recognizer:`, e);
+              }
             }
             resolve();
           }, 3000);
@@ -162,84 +178,109 @@ export function handleConnection(ws) {
           recognizer.stopContinuousRecognitionAsync(
             () => {
               clearTimeout(timeoutId);
-              logger.info('[语音识别] 识别器已停止');
+              logger.speech.info(`[${ws.connectionId}] Recognizer stopped`);
               recognizer.close();
               resolve();
             },
             error => {
               clearTimeout(timeoutId);
-              logger.error('[错误] 停止识别错误:', error);
+              logger.error(`[${ws.connectionId}] Error stopping recognition:`, error);
               try { recognizer.close(); } catch (e) { }
-              resolve(); // 即使出错也继续清理
+              resolve(); // Continue cleanup even if error occurs
             }
           );
         });
       }
       
-      // 重置所有资源
+      // Reset all resources
       pushStream = null;
       audioConfig = null;
       recognizer = null;
       
-      // 清理TTS资源
+      // Clean up TTS resources
       cancelOngoingActivities(ws, false);
     } catch (error) {
-      logger.error('[错误] 清理资源时出错:', error);
+      logger.error(`[${ws.connectionId}] Error cleaning up resources:`, error);
     }
   }
 
-  // 添加心跳检测
+  /**
+   * Safely send data to client
+   * @param {Object} data - Data to send
+   */
+  function sendToClient(data) {
+    if (!ws.connectionActive) return;
+    
+    try {
+      ws.send(JSON.stringify(data));
+    } catch (error) {
+      logger.error(`[${ws.connectionId}] Error sending data to client:`, error);
+    }
+  }
+
+  // Add heartbeat detection
   const pingInterval = setInterval(() => {
     if (ws.readyState === ws.OPEN) {
       try {
         ws.ping();
       } catch (e) {
-        logger.error('[WebSocket] 心跳检测失败:', e);
+        logger.error(`[${ws.connectionId}] Heartbeat ping failed:`, e);
+        clearInterval(pingInterval);
+        cleanupResources();
       }
     } else {
       clearInterval(pingInterval);
     }
   }, 30000);
 
-  // 初始化并设置处理器
+  // Initialize and set up handlers
   (async () => {
     try {
-      // 初始化识别器
+      // Initialize recognizer
       await setupRecognizer();
       
-      // 发送就绪状态
-      if (ws.connectionActive) {
-        ws.send(JSON.stringify({
-          status: 'ready',
-          message: '服务器已准备好，可以开始对话'
-        }));
-      }
+      // Send ready status
+      sendToClient({
+        status: 'ready',
+        message: 'Server is ready, you can start the conversation',
+        connectionId: ws.connectionId
+      });
 
-      // 处理接收到的音频数据
+      // Handle received audio data
       ws.on('message', async (data) => {
         if (!audioDataReceived && ws.connectionActive) {
           audioDataReceived = true;
-          logger.info('[WebSocket] 首次接收到音频数据，大小:', data.length, 'bytes');
+          logger.ws.info(`[${ws.connectionId}] First audio data received, size: ${data.length} bytes`);
         }
         
         await processAudioData(data);
       });
 
-      // 处理连接关闭
-      ws.on('close', async () => {
-        logger.info('[WebSocket] 连接关闭');
+      // Handle connection close
+      ws.on('close', async (code, reason) => {
+        logger.ws.info(`[${ws.connectionId}] Connection closed with code: ${code}, reason: ${reason || 'none'}`);
         clearInterval(pingInterval);
         await cleanupResources();
       });
 
-      // 处理错误
+      // Handle errors
       ws.on('error', (error) => {
-        logger.error('[WebSocket] 连接错误:', error);
+        logger.error(`[${ws.connectionId}] Connection error:`, error);
         clearInterval(pingInterval);
+        cleanupResources();
       });
     } catch (error) {
-      logger.error('[错误] WebSocket连接处理失败:', error);
+      logger.error(`[${ws.connectionId}] Failed to handle WebSocket connection:`, error);
       clearInterval(pingInterval);
+      cleanupResources();
     }
   })();
+}
+
+/**
+ * Get current active connection count
+ * @returns {number} Number of active connections
+ */
+export function getActiveConnectionCount() {
+  return activeConnections.size;
 } 

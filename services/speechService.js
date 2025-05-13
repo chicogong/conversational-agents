@@ -3,98 +3,203 @@ import config from '../config.js';
 import logger from './logger.js';
 
 /**
- * 初始化语音识别配置
+ * Creates a speech recognition configuration
+ * @returns {sdk.SpeechConfig} Configured speech recognition config
  */
 export function createSpeechConfig() {
-  const speechConfig = sdk.SpeechConfig.fromSubscription(
-    config.speech.key,
-    config.speech.region
-  );
-  speechConfig.speechRecognitionLanguage = config.speech.language;
-  return speechConfig;
+  try {
+    const speechConfig = sdk.SpeechConfig.fromSubscription(
+      config.speech.key,
+      config.speech.region
+    );
+    speechConfig.speechRecognitionLanguage = config.speech.language;
+    
+    // Add additional speech config settings
+    speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, '5000');
+    speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, '1000');
+    
+    return speechConfig;
+  } catch (error) {
+    logger.error(`Error creating speech config: ${error.message}`);
+    throw new Error(`Failed to initialize speech recognition: ${error.message}`);
+  }
 }
 
 /**
- * 初始化语音合成配置
+ * Creates a text-to-speech configuration
+ * @returns {sdk.SpeechConfig} Configured TTS config
  */
 export function createTTSConfig() {
-  const ttsConfig = sdk.SpeechConfig.fromSubscription(
-    config.speech.key,
-    config.speech.region
-  );
-  ttsConfig.speechSynthesisLanguage = config.speech.language;
-  ttsConfig.speechSynthesisVoiceName = config.speech.voice;
-  ttsConfig.setProperty(
-    sdk.PropertyId.SpeechServiceConnection_SynthOutputFormat, 
-    config.speech.outputFormat
-  );
-  return ttsConfig;
+  try {
+    const ttsConfig = sdk.SpeechConfig.fromSubscription(
+      config.speech.key,
+      config.speech.region
+    );
+    ttsConfig.speechSynthesisLanguage = config.speech.language;
+    ttsConfig.speechSynthesisVoiceName = config.speech.voice;
+    ttsConfig.setProperty(
+      sdk.PropertyId.SpeechServiceConnection_SynthOutputFormat, 
+      config.speech.outputFormat
+    );
+    
+    // Add additional TTS settings
+    ttsConfig.setProperty(sdk.PropertyId.SpeechServiceResponse_RequestSentenceBoundary, 'true');
+    
+    return ttsConfig;
+  } catch (error) {
+    logger.error(`Error creating TTS config: ${error.message}`);
+    throw new Error(`Failed to initialize speech synthesis: ${error.message}`);
+  }
 }
 
 /**
- * 检测音频数据中是否有声音活动
+ * Detects voice activity in audio data buffer
+ * @param {Buffer} buffer - Audio data buffer
+ * @returns {boolean} Whether voice activity is detected
  */
 export function detectVoiceActivity(buffer) {
-  let sum = 0;
-  for (let i = 0; i < Math.min(buffer.length, 100); i += 2) {
-    const sample = buffer.readInt16LE(i);
-    sum += Math.abs(sample);
+  try {
+    if (!buffer || buffer.length < 2) {
+      return false;
+    }
+    
+    // Sample size for detecting voice activity
+    const sampleSize = Math.min(buffer.length, 200);
+    let sum = 0;
+    
+    for (let i = 0; i < sampleSize; i += 2) {
+      const sample = buffer.readInt16LE(i);
+      sum += Math.abs(sample);
+    }
+    
+    const avgMagnitude = sum / (sampleSize / 2);
+    return avgMagnitude > config.speech.voiceDetectionThreshold;
+  } catch (error) {
+    logger.error(`Error detecting voice activity: ${error.message}`);
+    return false; // Default to no voice activity on error
   }
-  
-  const avgMagnitude = sum / (Math.min(buffer.length, 100) / 2);
-  return avgMagnitude > config.speech.voiceDetectionThreshold;
 }
 
 /**
- * 文本转语音处理
+ * Converts text to speech and sends audio to client
+ * @param {string} text - Text to synthesize
+ * @param {WebSocket} ws - WebSocket connection
+ * @returns {Promise<void>}
  */
 export async function textToSpeech(text, ws) {
-  const startTime = Date.now(); // 开始时间
-  logger.info('[TTS] 开始语音合成，文本:', text);
+  if (!text || !ws || !ws.connectionActive) {
+    return;
+  }
+  
+  const startTime = Date.now();
+  logger.speech.info(`[${ws.connectionId}] Starting speech synthesis, text: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
+  
+  let synthesizer = null;
   
   try {
+    // Clean up existing synthesizer
     if (ws.currentSynthesizer) {
-      ws.currentSynthesizer.close();
+      try {
+        ws.currentSynthesizer.close();
+      } catch (error) {
+        logger.speech.warn(`[${ws.connectionId}] Error closing previous synthesizer: ${error.message}`);
+      }
       ws.currentSynthesizer = null;
     }
     
-    const synthesizer = new sdk.SpeechSynthesizer(createTTSConfig());
+    // Create new synthesizer
+    synthesizer = new sdk.SpeechSynthesizer(createTTSConfig());
     ws.currentSynthesizer = synthesizer;
     
-    const result = await new Promise((resolve, reject) => {
-      synthesizer.speakTextAsync(
-        text,
-        result => resolve(result),
-        error => reject(error)
-      );
-    });
+    // Attach event handlers
+    synthesizer.synthesisStarted = () => {
+      logger.speech.debug(`[${ws.connectionId}] Synthesis started`);
+    };
+    
+    // Perform synthesis with timeout
+    const result = await Promise.race([
+      new Promise((resolve, reject) => {
+        synthesizer.speakTextAsync(
+          text,
+          result => resolve(result),
+          error => reject(error)
+        );
+      }),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('TTS synthesis timeout')), 8000);
+      })
+    ]);
 
-    // 检查合成是否被取消
-    if (!ws.currentSynthesizer) {
-      logger.info('[TTS] 合成被取消');
+    // Check if synthesis was cancelled
+    if (!ws.connectionActive || !ws.currentSynthesizer) {
+      logger.speech.info(`[${ws.connectionId}] Synthesis was cancelled`);
+      closeAndCleanup();
       return;
     }
 
+    // Handle successful synthesis
     if (result && result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-      const endTime = Date.now(); // 音频数据准备好的时间
-      logger.info(`[性能] TTS首帧耗时: ${endTime - startTime}ms`);
+      const endTime = Date.now();
+      logger.speech.info(`[${ws.connectionId}] TTS latency: ${endTime - startTime}ms`);
       
-      // 发送音频数据
-      ws.send(result.audioData);
+      // Send audio data to client
+      if (ws.connectionActive) {
+        try {
+          ws.send(result.audioData);
+        } catch (error) {
+          logger.error(`[${ws.connectionId}] Error sending TTS audio data: ${error.message}`);
+        }
+      }
     } else {
+      // Handle synthesis error
       const errorDetails = result ? 
-        `原因: ${result.reason}, 错误: ${result.errorDetails}` : 
-        '未知错误';
-      logger.error('[错误] 语音合成失败:', errorDetails);
-      ws.send(JSON.stringify({ error: `语音合成失败: ${errorDetails}` }));
+        `Reason: ${result.reason}, Error: ${result.errorDetails}` : 
+        'Unknown error';
+      
+      logger.error(`[${ws.connectionId}] Speech synthesis failed: ${errorDetails}`);
+      
+      if (ws.connectionActive) {
+        try {
+          ws.send(JSON.stringify({ 
+            error: `Speech synthesis failed`,
+            details: errorDetails
+          }));
+        } catch (sendError) {
+          logger.error(`[${ws.connectionId}] Error sending TTS error to client: ${sendError.message}`);
+        }
+      }
     }
     
-    synthesizer.close();
-    if (ws.currentSynthesizer === synthesizer) {
-      ws.currentSynthesizer = null;
-    }
+    closeAndCleanup();
   } catch (error) {
-    logger.error('[错误] TTS错误:', error);
-    ws.send(JSON.stringify({ error: `语音合成出错: ${error.message}` }));
+    logger.error(`[${ws.connectionId}] TTS error: ${error.message}`);
+    
+    if (ws.connectionActive) {
+      try {
+        ws.send(JSON.stringify({ 
+          error: 'Speech synthesis error',
+          details: error.message 
+        }));
+      } catch (sendError) {
+        logger.error(`[${ws.connectionId}] Error sending TTS error to client: ${sendError.message}`);
+      }
+    }
+    
+    closeAndCleanup();
+  }
+  
+  // Helper function to close synthesizer and clean up
+  function closeAndCleanup() {
+    if (synthesizer) {
+      try {
+        synthesizer.close();
+      } catch (error) {
+        logger.speech.warn(`[${ws.connectionId}] Error closing synthesizer: ${error.message}`);
+      }
+      
+      if (ws.currentSynthesizer === synthesizer) {
+        ws.currentSynthesizer = null;
+      }
+    }
   }
 } 
