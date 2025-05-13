@@ -139,17 +139,6 @@ body {
     word-wrap: break-word;
 }
 
-.message-timestamp {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    margin-top: 0.2rem;
-    text-align: right;
-}
-
-.user-message .message-timestamp {
-    color: rgba(255, 255, 255, 0.9);
-}
-
 .controls {
     padding: 1.2rem;
     background-color: white;

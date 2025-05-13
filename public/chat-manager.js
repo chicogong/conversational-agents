@@ -51,13 +51,6 @@ class ChatManager {
             
             messageDiv.appendChild(contentDiv);
             
-            // Add timestamp
-            const now = new Date();
-            const timestampDiv = document.createElement('div');
-            timestampDiv.className = 'message-timestamp';
-            timestampDiv.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-            messageDiv.appendChild(timestampDiv);
-            
             this.chatContainer.appendChild(messageDiv);
         } else {
             // Update existing message
