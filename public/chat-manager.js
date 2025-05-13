@@ -21,15 +21,17 @@ class ChatManager {
         const messageType = isUser ? 'user' : 'ai';
         let messageId = isUser ? this.currentUserMessageId : this.currentAIMessageId;
         
-        // If it's a new conversation round or there's no current message ID
-        if (!messageId || (!isPartial && isUser)) {
+        // Only create a new message if there's no existing message ID or it's a new AI response
+        if (!messageId || (!isUser && this.currentAIMessageId === null)) {
             this.messageCounter++;
             messageId = `msg-${messageType}-${this.messageCounter}`;
             
             if (isUser) {
                 this.currentUserMessageId = messageId;
-                // A new user message means a new conversation round, clear AI message ID
-                this.currentAIMessageId = null;
+                // Only clear AI message when creating a new user message that isn't partial
+                if (!isPartial) {
+                    this.currentAIMessageId = null;
+                }
             } else {
                 this.currentAIMessageId = messageId;
             }
@@ -41,14 +43,6 @@ class ChatManager {
             
             if (isPartial) {
                 messageDiv.classList.add('partial-message');
-            }
-            
-            // Add avatar if it's an AI message
-            if (!isUser) {
-                const avatarDiv = document.createElement('div');
-                avatarDiv.className = 'message-avatar';
-                avatarDiv.innerHTML = '<i class="fas fa-robot"></i>';
-                messageDiv.appendChild(avatarDiv);
             }
             
             const contentDiv = document.createElement('div');

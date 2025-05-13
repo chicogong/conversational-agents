@@ -68,35 +68,28 @@ body {
     justify-content: center;
     text-align: center;
     margin: auto;
-    padding: 2rem;
-    max-width: 500px;
+    padding: 1.5rem;
+    max-width: 400px;
     background-color: white;
-    border-radius: var(--border-radius);
-    box-shadow: var(--shadow);
+    border-radius: 12px;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.05);
 }
 
 .welcome-icon {
-    font-size: 3rem;
+    font-size: 2.5rem;
     color: var(--primary-color);
-    margin-bottom: 1.5rem;
-    background-color: var(--primary-light);
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    margin-bottom: 1rem;
 }
 
 .welcome-message h2 {
-    margin-bottom: 1rem;
+    margin-bottom: 0.8rem;
     color: var(--text-color);
+    font-size: 1.4rem;
 }
 
 .welcome-message p {
     color: #666;
     font-size: 1rem;
-    line-height: 1.6;
 }
 
 .chat-container {
@@ -111,13 +104,12 @@ body {
 
 .message {
     max-width: 80%;
-    padding: 1rem 1.2rem;
-    border-radius: var(--border-radius);
+    padding: 0.8rem 1rem;
+    border-radius: 12px;
     animation: fadeIn 0.3s ease-in;
     position: relative;
-    box-shadow: var(--shadow);
-    display: flex;
-    flex-direction: column;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.05);
+    margin-bottom: 0.8rem;
 }
 
 .user-message {
@@ -131,7 +123,6 @@ body {
     align-self: flex-start;
     background-color: white;
     border-bottom-left-radius: 4px;
-    padding-left: 3rem;
 }
 
 .partial-message {
@@ -146,31 +137,13 @@ body {
 .message-content {
     font-size: 1rem;
     word-wrap: break-word;
-    margin-bottom: 0.5rem;
-}
-
-.message-avatar {
-    position: absolute;
-    left: -12px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background-color: var(--primary-light);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--primary-color);
-    font-size: 1.2rem;
-    box-shadow: var(--shadow);
 }
 
 .message-timestamp {
-    align-self: flex-end;
     font-size: 0.75rem;
     opacity: 0.7;
     margin-top: 0.2rem;
+    text-align: right;
 }
 
 .user-message .message-timestamp {
