@@ -58,9 +58,9 @@ class ChatManager {
             messageDiv.appendChild(contentDiv);
             
             // Add timestamp
+            const now = new Date();
             const timestampDiv = document.createElement('div');
             timestampDiv.className = 'message-timestamp';
-            const now = new Date();
             timestampDiv.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
             messageDiv.appendChild(timestampDiv);
             
@@ -96,7 +96,6 @@ class ChatManager {
      * @param {string} text - Recognized text
      */
     handlePartialTranscription(text) {
-        console.log('[ASR] Partial recognition result:', text);
         this.updateMessage(text, true, true);
     }
     
@@ -105,7 +104,6 @@ class ChatManager {
      * @param {string} text - Recognized text
      */
     handleFinalTranscription(text) {
-        console.log('[ASR] Final recognition result:', text);
         this.updateMessage(text, true, false);
     }
     
@@ -129,8 +127,7 @@ class ChatManager {
         indicator.id = 'typingIndicator';
         
         for (let i = 0; i < 3; i++) {
-            const dot = document.createElement('span');
-            indicator.appendChild(dot);
+            indicator.appendChild(document.createElement('span'));
         }
         
         this.chatContainer.appendChild(indicator);
@@ -143,9 +140,7 @@ class ChatManager {
     hideTypingIndicator() {
         this.isTyping = false;
         const indicator = document.getElementById('typingIndicator');
-        if (indicator) {
-            indicator.remove();
-        }
+        if (indicator) indicator.remove();
     }
     
     /**

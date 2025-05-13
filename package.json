@@ -12,7 +12,9 @@
     "express": "^4.18.2",
     "log4js": "^6.9.1",
     "microsoft-cognitiveservices-speech-sdk": "^1.34.0",
+    "node-fetch": "^3.3.2",
     "openai": "^4.24.1",
+    "uuid": "^11.1.0",
     "ws": "^8.14.2"
   }
 }

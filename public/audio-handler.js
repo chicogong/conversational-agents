@@ -16,7 +16,6 @@ class AudioHandler {
 
     /**
      * Start streaming audio for conversation
-     * @returns {Promise<boolean>} Success status
      */
     async startStreamingConversation() {
         try {
@@ -39,8 +38,6 @@ class AudioHandler {
             // Target sample rate for processing
             const destinationSampleRate = 16000;
             const sourceSampleRate = this.audioContext.sampleRate;
-            
-            console.log(`[Audio] Original sample rate: ${sourceSampleRate}Hz, target: ${destinationSampleRate}Hz`);
             
             // Create processor
             this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
@@ -81,8 +78,6 @@ class AudioHandler {
 
     /**
      * Process and send audio data to the server
-     * @param {number} destinationSampleRate - Target sample rate
-     * @param {number} sourceSampleRate - Original sample rate
      * @private
      */
     _processAndSendAudioData(destinationSampleRate, sourceSampleRate) {
@@ -152,7 +147,6 @@ class AudioHandler {
 
     /**
      * Add audio data to the playback queue
-     * @param {Blob} audioData - Audio data blob
      */
     addToAudioQueue(audioData) {
         this.audioQueue.push(audioData);
@@ -162,8 +156,68 @@ class AudioHandler {
     }
 
     /**
+     * Convert PCM data to WAV format
+     * @param {ArrayBuffer} pcmBuffer - Raw PCM audio data
+     * @param {number} sampleRate - Sample rate of the audio (default: 16000)
+     * @returns {Blob} - WAV formatted audio blob
+     */
+    convertPCMToWAV(pcmBuffer, sampleRate = 16000) {
+        // Helper function to write a string to a DataView
+        const writeString = (view, offset, string) => {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        };
+        
+        // Create WAV header
+        const createWavHeader = (dataLength) => {
+            const buffer = new ArrayBuffer(44);
+            const view = new DataView(buffer);
+            
+            // RIFF identifier
+            writeString(view, 0, 'RIFF');
+            // File length (data length + 36)
+            view.setUint32(4, 36 + dataLength, true);
+            // WAVE identifier
+            writeString(view, 8, 'WAVE');
+            // Format chunk identifier
+            writeString(view, 12, 'fmt ');
+            // Format chunk length
+            view.setUint32(16, 16, true);
+            // Sample format (1 is PCM)
+            view.setUint16(20, 1, true);
+            // Channels (mono = 1)
+            view.setUint16(22, 1, true);
+            // Sample rate
+            view.setUint32(24, sampleRate, true);
+            // Byte rate (sample rate * block align)
+            view.setUint32(28, sampleRate * 2, true);
+            // Block align (channels * bytes per sample)
+            view.setUint16(32, 2, true);
+            // Bits per sample
+            view.setUint16(34, 16, true);
+            // Data chunk identifier
+            writeString(view, 36, 'data');
+            // Data chunk length
+            view.setUint32(40, dataLength, true);
+            
+            return buffer;
+        };
+        
+        // Create WAV header
+        const wavHeader = createWavHeader(pcmBuffer.byteLength);
+        
+        // Combine header and PCM data
+        const wavBuffer = new Uint8Array(wavHeader.byteLength + pcmBuffer.byteLength);
+        wavBuffer.set(new Uint8Array(wavHeader), 0);
+        wavBuffer.set(new Uint8Array(pcmBuffer), wavHeader.byteLength);
+        
+        // Create and return WAV blob
+        return new Blob([wavBuffer], { type: 'audio/wav' });
+    }
+
+    /**
      * Play the next audio in the queue
-     * @returns {Promise<void>}
      */
     async playNextAudio() {
         if (this.audioQueue.length === 0) {
@@ -182,7 +236,21 @@ class AudioHandler {
             const audioUrl = URL.createObjectURL(audioData);
             const response = await fetch(audioUrl);
             const arrayBuffer = await response.arrayBuffer();
-            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            
+            // Try to detect if this is raw PCM data based on MIME type or content inspection
+            let audioToPlay;
+            if (audioData.type === 'audio/wav' || audioData.type === 'audio/mp3') {
+                // Already in a playable format
+                audioToPlay = arrayBuffer;
+            } else {
+                // Convert from PCM to WAV if we suspect it's raw PCM
+                // We're assuming 16kHz 16-bit mono PCM
+                const wavBlob = this.convertPCMToWAV(arrayBuffer, 16000);
+                audioToPlay = await wavBlob.arrayBuffer();
+            }
+            
+            // Decode and play the audio
+            const audioBuffer = await this.audioContext.decodeAudioData(audioToPlay);
             
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;

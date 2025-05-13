@@ -2,8 +2,6 @@
     --primary-color: #4a86e8;
     --primary-light: #e8f0fe;
     --background-color: #f8f9fa;
-    --user-bubble: #e3f2fd;
-    --ai-bubble: #f1f8e9;
     --text-color: #333333;
     --border-radius: 16px;
     --shadow: 0 2px 10px rgba(0,0,0,0.05);
@@ -289,28 +287,16 @@ button:hover:not(:disabled) {
     50% { transform: translateY(-5px); }
 }
 
+/* Media Queries */
 @media (max-width: 768px) {
-    :root {
-        --container-height: 90vh;
-    }
-    
-    body {
-        padding: 1rem 0.5rem;
-    }
-    
-    .app-container {
-        max-width: 95%;
-    }
-    
-    .message {
-        max-width: 90%;
-    }
-    
+    :root { --container-height: 90vh; }
+    body { padding: 1rem 0.5rem; }
+    .app-container { max-width: 95%; }
+    .message { max-width: 90%; }
     .controls {
         flex-direction: column;
         padding: 1rem;
     }
-    
     button {
         width: 100%;
         justify-content: center;
@@ -318,26 +304,14 @@ button:hover:not(:disabled) {
 }
 
 @media (max-height: 600px) {
-    body {
-        padding: 0.5rem;
-    }
-    
-    :root {
-        --container-height: 95vh;
-    }
-    
+    body { padding: 0.5rem; }
+    :root { --container-height: 95vh; }
     .welcome-icon {
         width: 60px;
         height: 60px;
         font-size: 2rem;
         margin-bottom: 1rem;
     }
-    
-    .welcome-message {
-        padding: 1rem;
-    }
-    
-    .welcome-message h2 {
-        font-size: 1.3rem;
-    }
+    .welcome-message { padding: 1rem; }
+    .welcome-message h2 { font-size: 1.3rem; }
 } 

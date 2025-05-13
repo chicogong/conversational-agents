@@ -1,6 +1,8 @@
 import sdk from 'microsoft-cognitiveservices-speech-sdk';
 import config from '../config.js';
 import logger from './logger.js';
+import fetch from 'node-fetch';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Creates a speech recognition configuration
@@ -81,7 +83,7 @@ export function detectVoiceActivity(buffer) {
 }
 
 /**
- * Converts text to speech and sends audio to client
+ * Converts text to speech using streaming HTTP and sends audio chunks to client
  * @param {string} text - Text to synthesize
  * @param {WebSocket} ws - WebSocket connection
  * @returns {Promise<void>}
@@ -94,111 +96,106 @@ export async function textToSpeech(text, ws) {
   const startTime = Date.now();
   logger.speech.info(`[${ws.connectionId}] Starting speech synthesis, text: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
   
-  let synthesizer = null;
+  // Clean up existing synthesizer if present
+  if (ws.currentSynthesizer) {
+    try {
+      ws.currentSynthesizer.close();
+    } catch (error) {
+      logger.speech.warn(`[${ws.connectionId}] Error closing previous synthesizer: ${error.message}`);
+    }
+    ws.currentSynthesizer = null;
+  }
   
   try {
-    // Clean up existing synthesizer
-    if (ws.currentSynthesizer) {
-      try {
-        ws.currentSynthesizer.close();
-      } catch (error) {
-        logger.speech.warn(`[${ws.connectionId}] Error closing previous synthesizer: ${error.message}`);
-      }
-      ws.currentSynthesizer = null;
-    }
+    // Build SSML
+    const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${config.speech.language}">
+      <voice name="${config.speech.voice}">${text}</voice>
+    </speak>`;
     
-    // Create new synthesizer
-    synthesizer = new sdk.SpeechSynthesizer(createTTSConfig());
-    ws.currentSynthesizer = synthesizer;
-    
-    // Attach event handlers
-    synthesizer.synthesisStarted = () => {
-      logger.speech.debug(`[${ws.connectionId}] Synthesis started`);
+    // Set up request headers
+    const headers = {
+      'Ocp-Apim-Subscription-Key': config.speech.key,
+      'Content-Type': 'application/ssml+xml',
+      'X-Microsoft-OutputFormat': 'raw-16khz-16bit-mono-pcm',
+      'Accept': 'audio/wav'
     };
     
-    // Perform synthesis with timeout
-    const result = await Promise.race([
-      new Promise((resolve, reject) => {
-        synthesizer.speakTextAsync(
-          text,
-          result => resolve(result),
-          error => reject(error)
-        );
-      }),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('TTS synthesis timeout')), 8000);
-      })
-    ]);
-
-    // Check if synthesis was cancelled
-    if (!ws.connectionActive || !ws.currentSynthesizer) {
-      logger.speech.info(`[${ws.connectionId}] Synthesis was cancelled`);
-      closeAndCleanup();
-      return;
-    }
-
-    // Handle successful synthesis
-    if (result && result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-      const endTime = Date.now();
-      logger.speech.info(`[${ws.connectionId}] TTS latency: ${endTime - startTime}ms`);
-      
-      // Send audio data to client
-      if (ws.connectionActive) {
-        try {
-          ws.send(result.audioData);
-        } catch (error) {
-          logger.error(`[${ws.connectionId}] Error sending TTS audio data: ${error.message}`);
-        }
-      }
-    } else {
-      // Handle synthesis error
-      const errorDetails = result ? 
-        `Reason: ${result.reason}, Error: ${result.errorDetails}` : 
-        'Unknown error';
-      
-      logger.error(`[${ws.connectionId}] Speech synthesis failed: ${errorDetails}`);
+    // Construct the correct endpoint URL for Azure China
+    // China regions use the format: https://{region}.tts.speech.azure.cn/cognitiveservices/v1
+    const endpoint = `https://${config.speech.region}.tts.speech.azure.cn/cognitiveservices/v1`;
+    
+    logger.speech.debug(`[${ws.connectionId}] Using TTS endpoint: ${endpoint}`);
+    
+    // Perform streaming HTTP request
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: ssml,
+      timeout: 10000 // 10 second timeout
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[${ws.connectionId}] TTS request failed, status: ${response.status}, error: ${errorText}`);
       
       if (ws.connectionActive) {
         try {
-          ws.send(JSON.stringify({ 
+          ws.send(JSON.stringify({
             error: `Speech synthesis failed`,
-            details: errorDetails
+            details: `Status ${response.status}: ${errorText}`
           }));
         } catch (sendError) {
           logger.error(`[${ws.connectionId}] Error sending TTS error to client: ${sendError.message}`);
         }
       }
+      return;
     }
     
-    closeAndCleanup();
+    // Get response as ArrayBuffer
+    const buffer = await response.arrayBuffer();
+    
+    // No audio data returned
+    if (!buffer || buffer.byteLength === 0) {
+      logger.speech.warn(`[${ws.connectionId}] TTS response returned no audio data for text: "${text}"`);
+      if (ws.connectionActive) {
+        try {
+          ws.send(JSON.stringify({
+            error: 'Speech synthesis returned empty response',
+            details: 'No audio data received'
+          }));
+        } catch (sendError) {
+          logger.error(`[${ws.connectionId}] Error sending empty TTS notification: ${sendError.message}`);
+        }
+      }
+      return;
+    }
+    
+    // Create a Blob from the buffer and send it directly
+    // The client expects a Blob object for audio data
+    if (ws.connectionActive) {
+      try {
+        // For Node.js, we simply send the buffer directly
+        // WebSocket implementation will handle it correctly
+        ws.send(Buffer.from(buffer));
+      } catch (error) {
+        logger.error(`[${ws.connectionId}] Error sending TTS audio: ${error.message}`);
+      }
+    }
+    
+    const endTime = Date.now();
+    logger.speech.info(`[${ws.connectionId}] TTS streaming complete, audio size: ${buffer.byteLength} bytes, latency: ${endTime - startTime}ms`);
+    
   } catch (error) {
-    logger.error(`[${ws.connectionId}] TTS error: ${error.message}`);
+    logger.error(`[${ws.connectionId}] TTS streaming error: ${error.message}`);
     
     if (ws.connectionActive) {
       try {
-        ws.send(JSON.stringify({ 
+        ws.send(JSON.stringify({
           error: 'Speech synthesis error',
-          details: error.message 
+          details: error.message
         }));
       } catch (sendError) {
         logger.error(`[${ws.connectionId}] Error sending TTS error to client: ${sendError.message}`);
-      }
-    }
-    
-    closeAndCleanup();
-  }
-  
-  // Helper function to close synthesizer and clean up
-  function closeAndCleanup() {
-    if (synthesizer) {
-      try {
-        synthesizer.close();
-      } catch (error) {
-        logger.speech.warn(`[${ws.connectionId}] Error closing synthesizer: ${error.message}`);
-      }
-      
-      if (ws.currentSynthesizer === synthesizer) {
-        ws.currentSynthesizer = null;
       }
     }
   }

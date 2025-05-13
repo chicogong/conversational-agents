@@ -57,8 +57,7 @@ class ConversationalApp {
                 this.disableButtons();
                 this.stopConversation();
             },
-            onError: (error) => {
-                console.error('[Error] WebSocket error:', error);
+            onError: () => {
                 this.updateStatus('连接错误，请刷新页面');
                 this.disableButtons();
             },
@@ -90,9 +89,6 @@ class ConversationalApp {
                 this.chatManager.hideTypingIndicator();
                 this.chatManager.handleAIResponse(`错误: ${error}`);
                 console.error('[Server Error]', error);
-            },
-            onServerStatus: (message) => {
-                console.log('[Server Status]', message);
             }
         });
         
@@ -147,7 +143,6 @@ class ConversationalApp {
     
     /**
      * Update status element
-     * @param {string} message - Status message
      */
     updateStatus(message) {
         this.statusElement.textContent = message;
@@ -155,7 +150,6 @@ class ConversationalApp {
     
     /**
      * Update status with recording indicator
-     * @param {string} message - Status message
      */
     updateStatusWithIndicator(message) {
         this.statusElement.innerHTML = `<span class="recording-indicator"></span>${message}`;

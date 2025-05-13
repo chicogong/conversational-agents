@@ -13,7 +13,6 @@ class WebSocketClient {
      * @param {Function} handlers.onAIResponse - AI response handler
      * @param {Function} handlers.onInterrupt - Interrupt signal handler
      * @param {Function} handlers.onServerError - Server error handler
-     * @param {Function} handlers.onServerStatus - Server status handler
      */
     constructor(handlers = {}) {
         this.websocket = null;
@@ -36,7 +35,6 @@ class WebSocketClient {
             // Use the same protocol and host as the current page
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host}`;
-            console.log('[WebSocket] Connecting to:', wsUrl);
             
             this.websocket = new WebSocket(wsUrl);
             
@@ -48,40 +46,23 @@ class WebSocketClient {
             }, 5000);
             
             this.websocket.onopen = () => {
-                console.log('[WebSocket] Connection established');
                 clearTimeout(connectionTimeout);
                 this.reconnectAttempts = 0;
-                
-                if (this.handlers.onOpen) {
-                    this.handlers.onOpen();
-                }
-                
+                if (this.handlers.onOpen) this.handlers.onOpen();
                 resolve();
             };
 
-            this.websocket.onmessage = (event) => {
-                this._handleMessage(event);
-            };
+            this.websocket.onmessage = (event) => this._handleMessage(event);
 
-            this.websocket.onclose = (event) => {
-                console.log('[WebSocket] Connection closed', event.code, event.reason);
+            this.websocket.onclose = () => {
                 clearTimeout(connectionTimeout);
-                
-                if (this.handlers.onClose) {
-                    this.handlers.onClose();
-                }
-                
+                if (this.handlers.onClose) this.handlers.onClose();
                 this._scheduleReconnect();
             };
 
             this.websocket.onerror = (error) => {
-                console.error('[Error] WebSocket error:', error);
                 clearTimeout(connectionTimeout);
-                
-                if (this.handlers.onError) {
-                    this.handlers.onError(error);
-                }
-                
+                if (this.handlers.onError) this.handlers.onError(error);
                 reject(error);
             };
         });
@@ -141,9 +122,7 @@ class WebSocketClient {
         try {
             const data = JSON.parse(event.data);
             
-            if (data.status && this.handlers.onServerStatus) {
-                this.handlers.onServerStatus(data.message);
-            } else if (data.transcription && this.handlers.onTranscription) {
+            if (data.transcription && this.handlers.onTranscription) {
                 this.handlers.onTranscription(data.transcription);
             } else if (data.partialTranscription && this.handlers.onPartialTranscription) {
                 this.handlers.onPartialTranscription(data.partialTranscription);
@@ -155,7 +134,7 @@ class WebSocketClient {
                 this.handlers.onServerError(data.error);
             }
         } catch (error) {
-            console.error('[Error] Failed to parse server message:', error, event.data);
+            console.error('[Error] Failed to parse server message:', error);
         }
     }
 
@@ -164,21 +143,13 @@ class WebSocketClient {
      * @private
      */
     _scheduleReconnect() {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('[WebSocket] Maximum reconnection attempts reached');
-            return;
-        }
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
         
         const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-        console.log(`[WebSocket] Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
         
         this.reconnectTimeout = setTimeout(() => {
             this.reconnectAttempts++;
-            console.log(`[WebSocket] Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-            
-            this.connect().catch(error => {
-                console.error('[WebSocket] Reconnection failed:', error);
-            });
+            this.connect().catch(() => {});
         }, delay);
     }
 }
