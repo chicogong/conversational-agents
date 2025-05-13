@@ -7,6 +7,26 @@ import logger from './logger.js';
 const activeConnections = new Set();
 
 /**
+ * Creates a typed message object with standardized format
+ * @param {string} type - Message type
+ * @param {*} payload - Message payload
+ * @param {Object} additionalFields - Additional fields to include
+ * @returns {Object} - Standardized message object
+ */
+export function createMessage(type, payload = null, additionalFields = {}) {
+  const message = {
+    type,
+    ...additionalFields
+  };
+  
+  if (payload !== null) {
+    message.payload = payload;
+  }
+  
+  return message;
+}
+
+/**
  * Handles a new WebSocket connection
  * @param {WebSocket} ws - WebSocket connection 
  */
@@ -112,10 +132,9 @@ export function handleConnection(ws) {
       await startContinuousRecognition();
     } catch (error) {
       logger.error(`[${ws.connectionId}] Error setting up speech recognizer: ${error.message}`);
-      sendToClient({ 
-        error: `Failed to set up speech recognizer`, 
-        details: error.message 
-      });
+      sendToClient(
+        createMessage('error', 'Failed to set up speech recognizer', { details: error.message })
+      );
       throw error;
     }
   }
@@ -134,7 +153,7 @@ export function handleConnection(ws) {
         cancelOngoingActivities(ws);
         
         // Send intermediate results
-        sendToClient({ partialTranscription: e.result.text });
+        sendToClient(createMessage('partialTranscription', e.result.text));
       }
     };
 
@@ -146,7 +165,7 @@ export function handleConnection(ws) {
         cancelOngoingActivities(ws);
         
         // Send final recognition result
-        sendToClient({ transcription: e.result.text });
+        sendToClient(createMessage('transcription', e.result.text));
         
         // Call language model
         callLLM(e.result.text, ws);
@@ -346,11 +365,10 @@ export function handleConnection(ws) {
       await setupRecognizer();
       
       // Send ready status
-      sendToClient({
-        status: 'ready',
+      sendToClient(createMessage('status', 'ready', {
         message: 'Server is ready, you can start the conversation',
         connectionId: ws.connectionId
-      });
+      }));
     } catch (error) {
       logger.error(`[${ws.connectionId}] Failed to handle WebSocket connection: ${error.message}`);
       clearInterval(pingInterval);

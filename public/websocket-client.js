@@ -1,3 +1,6 @@
+import SignalHandler from './signal-handler.js';
+import ConnectionConfig from './connection-config.js';
+
 /**
  * WebSocket client for handling server communication
  */
@@ -18,8 +21,9 @@ class WebSocketClient {
         this.websocket = null;
         this.handlers = handlers;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
+        this.maxReconnectAttempts = ConnectionConfig.MAX_RECONNECT_ATTEMPTS;
         this.reconnectTimeout = null;
+        this.signalHandler = new SignalHandler(handlers);
     }
 
     /**
@@ -32,9 +36,8 @@ class WebSocketClient {
                 this.websocket.close();
             }
             
-            // Use the same protocol and host as the current page
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}`;
+            // Get WebSocket URL from configuration
+            const wsUrl = ConnectionConfig.getWebSocketUrl();
             
             this.websocket = new WebSocket(wsUrl);
             
@@ -43,7 +46,7 @@ class WebSocketClient {
                     reject(new Error('Connection timeout'));
                     this.websocket.close();
                 }
-            }, 5000);
+            }, ConnectionConfig.CONNECTION_TIMEOUT);
             
             this.websocket.onopen = () => {
                 clearTimeout(connectionTimeout);
@@ -52,7 +55,7 @@ class WebSocketClient {
                 resolve();
             };
 
-            this.websocket.onmessage = (event) => this._handleMessage(event);
+            this.websocket.onmessage = (event) => this.signalHandler.processMessage(event);
 
             this.websocket.onclose = () => {
                 clearTimeout(connectionTimeout);
@@ -105,47 +108,16 @@ class WebSocketClient {
     }
 
     /**
-     * Handle WebSocket messages
-     * @param {MessageEvent} event - WebSocket message event
-     * @private
-     */
-    _handleMessage(event) {
-        // Check if the message is binary data (audio)
-        if (event.data instanceof Blob) {
-            if (this.handlers.onAudioData) {
-                this.handlers.onAudioData(event.data);
-            }
-            return;
-        }
-        
-        // Handle JSON messages
-        try {
-            const data = JSON.parse(event.data);
-            
-            if (data.transcription && this.handlers.onTranscription) {
-                this.handlers.onTranscription(data.transcription);
-            } else if (data.partialTranscription && this.handlers.onPartialTranscription) {
-                this.handlers.onPartialTranscription(data.partialTranscription);
-            } else if (data.llmResponse && this.handlers.onAIResponse) {
-                this.handlers.onAIResponse(data.llmResponse);
-            } else if (data.interrupt && this.handlers.onInterrupt) {
-                this.handlers.onInterrupt();
-            } else if (data.error && this.handlers.onServerError) {
-                this.handlers.onServerError(data.error);
-            }
-        } catch (error) {
-            console.error('[Error] Failed to parse server message:', error);
-        }
-    }
-
-    /**
      * Schedule a reconnection attempt
      * @private
      */
     _scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
         
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+        const delay = Math.min(
+            ConnectionConfig.RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts),
+            ConnectionConfig.MAX_RECONNECT_DELAY
+        );
         
         this.reconnectTimeout = setTimeout(() => {
             this.reconnectAttempts++;

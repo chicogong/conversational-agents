@@ -47,7 +47,7 @@ class ConversationalApp {
      * Initialize WebSocket connection
      */
     async initWebSocket() {
-        this.webSocketClient = new WebSocketClient({
+        const handlers = {
             onOpen: () => {
                 this.updateStatus('已连接');
                 this.enableStartButton();
@@ -90,8 +90,9 @@ class ConversationalApp {
                 this.chatManager.handleAIResponse(`错误: ${error}`);
                 console.error('[Server Error]', error);
             }
-        });
+        };
         
+        this.webSocketClient = new WebSocketClient(handlers);
         await this.webSocketClient.connect();
         this.audioHandler = new AudioHandler(this.webSocketClient.websocket);
     }

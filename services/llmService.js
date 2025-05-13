@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import config from '../config.js';
 import { textToSpeech } from './speechService.js';
 import logger from './logger.js';
+import { createMessage } from './wsHandler.js';
 
 // Initialize OpenAI API client
 const openai = new OpenAI({
@@ -48,7 +49,7 @@ export function cancelOngoingActivities(ws, sendInterrupt = true) {
   
   // Send interrupt signal to client
   if (sendInterrupt && ws.connectionActive) {
-    sendToClient(ws, { interrupt: true });
+    sendToClient(ws, createMessage('interrupt'));
   }
 }
 
@@ -106,10 +107,7 @@ export async function processNextTTS(ws) {
     ws.ttsPendingSentences.length = 0; // Clear queue on error to avoid deadlock
     
     // Attempt to send error to client
-    sendToClient(ws, { 
-      error: 'TTS processing error', 
-      details: error.message 
-    });
+    sendToClient(ws, createMessage('error', 'TTS processing error', { details: error.message }));
   }
 }
 
@@ -182,7 +180,7 @@ async function processLLMStream(ws, stream) {
         currentSentence += content;
         
         // Update complete response on frontend
-        sendToClient(ws, { llmResponse: fullResponse });
+        sendToClient(ws, createMessage('llmResponse', fullResponse));
         
         // Check for sentence end punctuation
         if (config.patterns.sentenceEnd.test(content)) {
@@ -264,10 +262,9 @@ export async function callLLM(text, ws) {
     
     logger.error(`[${ws.connectionId}] Error calling LLM: ${error.message}`);
     
-    sendToClient(ws, { 
-      error: 'Error calling language model',
+    sendToClient(ws, createMessage('error', 'Error calling language model', {
       details: process.env.NODE_ENV === 'development' ? error.message : 'Service unavailable'
-    });
+    }));
   }
 }
 
@@ -290,5 +287,5 @@ export function clearConversationHistory(ws) {
   const systemMessage = ws.conversationHistory?.[0];
   ws.conversationHistory = systemMessage ? [systemMessage] : null;
   
-  sendToClient(ws, { conversationCleared: true });
+  sendToClient(ws, createMessage('conversationCleared', true));
 } 
