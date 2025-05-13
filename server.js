@@ -4,7 +4,7 @@ import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import config from './config.js';
-import { handleConnection } from './services/wsHandler.js';
+import { wsService } from './services/wsHandler.js';
 import logger from './services/logger.js';
 
 // Set up directory paths
@@ -24,7 +24,7 @@ function initializeServer() {
   app.use(express.static(path.join(__dirname, 'public')));
   
   // Handle WebSocket connections
-  wss.on('connection', handleConnection);
+  wss.on('connection', wsService.handleConnection);
   
   return { app, server, wss };
 }
@@ -97,7 +97,8 @@ function startServer(server) {
       logger.info(`Server running at http://${config.server.host}:${config.server.port}`);
       logger.info('WebSocket service enabled on the same port');
       logger.info('Azure Speech Recognition service enabled');
-      logger.info(`Using region: ${config.speech.region}`);
+      logger.info(`Using OpenAI model: ${config.openai.model}`);
+      logger.info(`Using Azure region: ${config.speech.region}`);
       resolve();
     });
     
@@ -124,6 +125,7 @@ async function main() {
     
     // Log startup success
     logger.info('Server initialization complete');
+    logger.info(`Active connections: ${wsService.getActiveConnectionCount()}`);
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);

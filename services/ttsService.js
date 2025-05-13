@@ -2,36 +2,13 @@ import sdk from 'microsoft-cognitiveservices-speech-sdk';
 import config from '../config.js';
 import logger from './logger.js';
 import fetch from 'node-fetch';
-import { v4 as uuidv4 } from 'uuid';
-
-/**
- * Creates a speech recognition configuration
- * @returns {sdk.SpeechConfig} Configured speech recognition config
- */
-export function createSpeechConfig() {
-  try {
-    const speechConfig = sdk.SpeechConfig.fromSubscription(
-      config.speech.key,
-      config.speech.region
-    );
-    speechConfig.speechRecognitionLanguage = config.speech.language;
-    
-    // Add additional speech config settings
-    speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, '5000');
-    speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, '1000');
-    
-    return speechConfig;
-  } catch (error) {
-    logger.error(`Error creating speech config: ${error.message}`);
-    throw new Error(`Failed to initialize speech recognition: ${error.message}`);
-  }
-}
+import { wsService } from './wsHandler.js';
 
 /**
  * Creates a text-to-speech configuration
  * @returns {sdk.SpeechConfig} Configured TTS config
  */
-export function createTTSConfig() {
+function createTTSConfig() {
   try {
     const ttsConfig = sdk.SpeechConfig.fromSubscription(
       config.speech.key,
@@ -51,34 +28,6 @@ export function createTTSConfig() {
   } catch (error) {
     logger.error(`Error creating TTS config: ${error.message}`);
     throw new Error(`Failed to initialize speech synthesis: ${error.message}`);
-  }
-}
-
-/**
- * Detects voice activity in audio data buffer
- * @param {Buffer} buffer - Audio data buffer
- * @returns {boolean} Whether voice activity is detected
- */
-export function detectVoiceActivity(buffer) {
-  try {
-    if (!buffer || buffer.length < 2) {
-      return false;
-    }
-    
-    // Sample size for detecting voice activity
-    const sampleSize = Math.min(buffer.length, 200);
-    let sum = 0;
-    
-    for (let i = 0; i < sampleSize; i += 2) {
-      const sample = buffer.readInt16LE(i);
-      sum += Math.abs(sample);
-    }
-    
-    const avgMagnitude = sum / (sampleSize / 2);
-    return avgMagnitude > config.speech.voiceDetectionThreshold;
-  } catch (error) {
-    logger.error(`Error detecting voice activity: ${error.message}`);
-    return false; // Default to no voice activity on error
   }
 }
 
@@ -107,19 +56,28 @@ function buildSSML(text) {
 }
 
 /**
- * Sends error notification to client via WebSocket
+ * Cancel TTS processing
  * @param {WebSocket} ws - WebSocket connection
- * @param {string} message - Error message
- * @param {string} details - Error details
  */
-function sendErrorToClient(ws, message, details) {
-  if (!ws || !ws.connectionActive) return;
+function cancelTTS(ws) {
+  if (!ws) return;
   
-  try {
-    ws.send(JSON.stringify({ error: message, details }));
-  } catch (error) {
-    logger.error(`[${ws.connectionId}] Error sending error message to client: ${error.message}`);
+  // Cancel current synthesizer
+  if (ws.context.speech.synthesizer) {
+    try {
+      ws.context.speech.synthesizer.close();
+    } catch (error) {
+      logger.error(`[${ws.connectionId}] Error closing synthesizer: ${error.message}`);
+    }
+    ws.context.speech.synthesizer = null;
   }
+  
+  // Clear TTS queue
+  if (ws.ttsPendingSentences) {
+    ws.ttsPendingSentences.length = 0;
+  }
+  
+  ws.processingTTS = false;
 }
 
 /**
@@ -128,7 +86,7 @@ function sendErrorToClient(ws, message, details) {
  * @param {WebSocket} ws - WebSocket connection
  * @returns {Promise<void>}
  */
-export async function textToSpeech(text, ws) {
+async function textToSpeech(text, ws) {
   if (!text || !ws || !ws.connectionActive) {
     return;
   }
@@ -162,7 +120,10 @@ export async function textToSpeech(text, ws) {
     if (!response.ok) {
       const errorText = await response.text();
       logger.error(`[${ws.connectionId}] TTS request failed, status: ${response.status}, error: ${errorText}`);
-      sendErrorToClient(ws, `Speech synthesis failed`, `Status ${response.status}: ${errorText}`);
+      wsService.sendToClient(
+        ws, 
+        wsService.createMessage('error', 'Speech synthesis failed', { details: `Status ${response.status}: ${errorText}` })
+      );
       return;
     }
     
@@ -170,7 +131,10 @@ export async function textToSpeech(text, ws) {
     
     if (!buffer || buffer.byteLength === 0) {
       logger.speech.warn(`[${ws.connectionId}] TTS response returned no audio data for text: "${logText}"`);
-      sendErrorToClient(ws, 'Speech synthesis returned empty response', 'No audio data received');
+      wsService.sendToClient(
+        ws, 
+        wsService.createMessage('error', 'Speech synthesis returned empty response', { details: 'No audio data received' })
+      );
       return;
     }
     
@@ -187,7 +151,55 @@ export async function textToSpeech(text, ws) {
     
   } catch (error) {
     logger.error(`[${ws.connectionId}] TTS streaming error: ${error.message}`);
-    sendErrorToClient(ws, 'Speech synthesis error', error.message);
+    wsService.sendToClient(
+      ws, 
+      wsService.createMessage('error', 'Speech synthesis error', { details: error.message })
+    );
+  }
+}
+
+/**
+ * Process next TTS request in queue
+ * @param {WebSocket} ws - WebSocket connection
+ */
+async function processNextTTS(ws) {
+  // Exit if queue is empty or connection was interrupted
+  if (!ws || 
+      !ws.ttsPendingSentences || 
+      ws.ttsPendingSentences.length === 0 || 
+      !ws.connectionActive) {
+    if (ws) ws.processingTTS = false;
+    return;
+  }
+  
+  ws.processingTTS = true;
+  const text = ws.ttsPendingSentences[0];
+  
+  try {
+    const truncatedText = text.length > 30 ? `${text.substring(0, 30)}...` : text;
+    logger.speech.debug(`[${ws.connectionId}] Processing TTS for text: "${truncatedText}"`);
+    
+    await textToSpeech(text, ws);
+    
+    // Remove processed sentence
+    ws.ttsPendingSentences.shift();
+    
+    // Process next sentence
+    if (ws.ttsPendingSentences.length > 0 && ws.connectionActive) {
+      processNextTTS(ws);
+    } else {
+      ws.processingTTS = false;
+    }
+  } catch (error) {
+    logger.error(`[${ws.connectionId}] Error processing TTS queue: ${error.message}`);
+    ws.processingTTS = false;
+    ws.ttsPendingSentences.length = 0; // Clear queue on error to avoid deadlock
+    
+    // Attempt to send error to client
+    wsService.sendToClient(
+      ws, 
+      wsService.createMessage('error', 'TTS processing error', { details: error.message })
+    );
   }
 }
 
@@ -196,12 +208,28 @@ export async function textToSpeech(text, ws) {
  * @param {WebSocket} ws - WebSocket connection with synthesizer property
  */
 function cleanupSynthesizer(ws) {
-  if (ws.currentSynthesizer) {
+  if (ws.context.speech.synthesizer) {
     try {
-      ws.currentSynthesizer.close();
+      ws.context.speech.synthesizer.close();
     } catch (error) {
       logger.speech.warn(`[${ws.connectionId}] Error closing previous synthesizer: ${error.message}`);
     }
-    ws.currentSynthesizer = null;
+    ws.context.speech.synthesizer = null;
   }
-} 
+}
+
+/**
+ * Clean up TTS resources
+ * @param {WebSocket} ws - WebSocket connection
+ */
+function cleanup(ws) {
+  cancelTTS(ws);
+}
+
+// Export TTS service
+export const ttsService = {
+  textToSpeech,
+  processNextTTS,
+  cancelTTS,
+  cleanup
+}; 
