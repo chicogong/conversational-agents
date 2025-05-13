@@ -18,12 +18,14 @@ const MAX_CONVERSATION_HISTORY = 10;
  * @param {boolean} sendInterrupt - Whether to send interrupt signal to client
  */
 export function cancelOngoingActivities(ws, sendInterrupt = true) {
+  if (!ws) return;
+  
   // Cancel LLM stream
   if (ws.llmStream) {
     try {
       ws.llmStream.controller.abort();
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Error aborting LLM stream:`, error);
+      logger.error(`[${ws.connectionId}] Error aborting LLM stream: ${error.message}`);
     }
     ws.llmStream = null;
   }
@@ -33,7 +35,7 @@ export function cancelOngoingActivities(ws, sendInterrupt = true) {
     try {
       ws.currentSynthesizer.close();
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Error closing synthesizer:`, error);
+      logger.error(`[${ws.connectionId}] Error closing synthesizer: ${error.message}`);
     }
     ws.currentSynthesizer = null;
   }
@@ -46,11 +48,22 @@ export function cancelOngoingActivities(ws, sendInterrupt = true) {
   
   // Send interrupt signal to client
   if (sendInterrupt && ws.connectionActive) {
-    try {
-      ws.send(JSON.stringify({ interrupt: true }));
-    } catch (error) {
-      logger.error(`[${ws.connectionId}] Error sending interrupt signal:`, error);
-    }
+    sendToClient(ws, { interrupt: true });
+  }
+}
+
+/**
+ * Safely send data to client
+ * @param {WebSocket} ws - WebSocket connection
+ * @param {Object} data - Data to send
+ */
+function sendToClient(ws, data) {
+  if (!ws || !ws.connectionActive) return;
+  
+  try {
+    ws.send(JSON.stringify(data));
+  } catch (error) {
+    logger.error(`[${ws.connectionId}] Error sending data to client: ${error.message}`);
   }
 }
 
@@ -60,11 +73,12 @@ export function cancelOngoingActivities(ws, sendInterrupt = true) {
  */
 export async function processNextTTS(ws) {
   // Exit if queue is empty or connection was interrupted
-  if (!ws.ttsPendingSentences || 
+  if (!ws || 
+      !ws.ttsPendingSentences || 
       ws.ttsPendingSentences.length === 0 || 
       !ws.llmStream || 
       !ws.connectionActive) {
-    ws.processingTTS = false;
+    if (ws) ws.processingTTS = false;
     return;
   }
   
@@ -72,7 +86,9 @@ export async function processNextTTS(ws) {
   const text = ws.ttsPendingSentences[0];
   
   try {
-    logger.speech.debug(`[${ws.connectionId}] Processing TTS for text: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
+    const truncatedText = text.length > 30 ? `${text.substring(0, 30)}...` : text;
+    logger.speech.debug(`[${ws.connectionId}] Processing TTS for text: "${truncatedText}"`);
+    
     await textToSpeech(text, ws);
     
     // Remove processed sentence
@@ -85,18 +101,15 @@ export async function processNextTTS(ws) {
       ws.processingTTS = false;
     }
   } catch (error) {
-    logger.error(`[${ws.connectionId}] Error processing TTS queue:`, error);
+    logger.error(`[${ws.connectionId}] Error processing TTS queue: ${error.message}`);
     ws.processingTTS = false;
     ws.ttsPendingSentences.length = 0; // Clear queue on error to avoid deadlock
     
     // Attempt to send error to client
-    if (ws.connectionActive) {
-      try {
-        ws.send(JSON.stringify({ error: 'TTS processing error', details: error.message }));
-      } catch (sendError) {
-        logger.error(`[${ws.connectionId}] Error sending TTS error to client:`, sendError);
-      }
-    }
+    sendToClient(ws, { 
+      error: 'TTS processing error', 
+      details: error.message 
+    });
   }
 }
 
@@ -135,73 +148,36 @@ function addToConversationHistory(ws, role, content) {
 }
 
 /**
- * Safely send data to client
+ * Process streaming LLM response
  * @param {WebSocket} ws - WebSocket connection
- * @param {Object} data - Data to send
+ * @param {AsyncIterable} stream - OpenAI stream response
+ * @returns {Promise<string>} Full response from LLM
  */
-function sendToClient(ws, data) {
-  if (!ws.connectionActive) return;
-  
-  try {
-    ws.send(JSON.stringify(data));
-  } catch (error) {
-    logger.error(`[${ws.connectionId}] Error sending data to client:`, error);
-  }
-}
-
-/**
- * Call language model to process user input
- * @param {string} text - User input text
- * @param {WebSocket} ws - WebSocket connection
- */
-export async function callLLM(text, ws) {
-  // Track performance
+async function processLLMStream(ws, stream) {
+  let fullResponse = '';
+  let currentSentence = '';
+  let firstTokenTime = null;
   const startTime = Date.now();
-  let llmFirstTokenTime = null;
   
   try {
-    logger.llm.info(`[${ws.connectionId}] Processing user query: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-    
-    // Cancel ongoing activities
-    cancelOngoingActivities(ws, false);
-    
-    // Initialize and update conversation history
-    initConversationHistory(ws);
-    addToConversationHistory(ws, "user", text);
-    
-    // Create messages array from conversation history
-    const messages = [...ws.conversationHistory];
-    
-    // Call OpenAI API with streaming response
-    const stream = await openai.chat.completions.create({
-      model: config.openai.model,
-      messages: messages,
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 300,
-    });
-
     // Save stream reference for potential cancellation
     ws.llmStream = stream;
-
-    let fullResponse = '';
-    let currentSentence = '';
     
     for await (const chunk of stream) {
       // Check if response was cancelled
       if (!ws.llmStream || !ws.connectionActive) {
         logger.llm.info(`[${ws.connectionId}] LLM response cancelled`);
-        return;
+        return fullResponse;
       }
-
+  
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
         // Record first token time
-        if (!llmFirstTokenTime) {
-          llmFirstTokenTime = Date.now();
-          logger.llm.info(`[${ws.connectionId}] LLM first token latency: ${llmFirstTokenTime - startTime}ms`);
+        if (!firstTokenTime) {
+          firstTokenTime = Date.now();
+          logger.llm.info(`[${ws.connectionId}] LLM first token latency: ${firstTokenTime - startTime}ms`);
         }
-
+  
         fullResponse += content;
         currentSentence += content;
         
@@ -227,14 +203,57 @@ export async function callLLM(text, ws) {
         processNextTTS(ws);
       }
     }
+    
+    return fullResponse;
+  } finally {
+    // Clear stream reference when done or on error
+    ws.llmStream = null;
+  }
+}
+
+/**
+ * Call language model to process user input
+ * @param {string} text - User input text
+ * @param {WebSocket} ws - WebSocket connection
+ */
+export async function callLLM(text, ws) {
+  if (!text || !ws || !ws.connectionActive) return;
+  
+  // Track performance
+  const startTime = Date.now();
+  
+  try {
+    const truncatedText = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+    logger.llm.info(`[${ws.connectionId}] Processing user query: "${truncatedText}"`);
+    
+    // Cancel ongoing activities
+    cancelOngoingActivities(ws, false);
+    
+    // Initialize queue if needed
+    if (!ws.ttsPendingSentences) {
+      ws.ttsPendingSentences = [];
+    }
+    
+    // Initialize and update conversation history
+    initConversationHistory(ws);
+    addToConversationHistory(ws, "user", text);
+    
+    // Call OpenAI API with streaming response
+    const stream = await openai.chat.completions.create({
+      model: config.openai.model,
+      messages: [...ws.conversationHistory],
+      stream: true,
+      temperature: 0.7,
+      max_tokens: 300,
+    });
+
+    // Process stream response
+    const fullResponse = await processLLMStream(ws, stream);
 
     // Save assistant response to conversation history
     if (fullResponse) {
       addToConversationHistory(ws, "assistant", fullResponse);
     }
-
-    // Clear stream reference
-    ws.llmStream = null;
     
     logger.llm.info(`[${ws.connectionId}] LLM response completed in ${Date.now() - startTime}ms`);
   } catch (error) {
@@ -243,14 +262,12 @@ export async function callLLM(text, ws) {
       return;
     }
     
-    logger.error(`[${ws.connectionId}] Error calling LLM:`, error);
+    logger.error(`[${ws.connectionId}] Error calling LLM: ${error.message}`);
     
-    if (ws.connectionActive) {
-      sendToClient(ws, { 
-        error: 'Error calling language model',
-        details: process.env.NODE_ENV === 'development' ? error.message : 'Service unavailable'
-      });
-    }
+    sendToClient(ws, { 
+      error: 'Error calling language model',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Service unavailable'
+    });
   }
 }
 
@@ -273,7 +290,5 @@ export function clearConversationHistory(ws) {
   const systemMessage = ws.conversationHistory?.[0];
   ws.conversationHistory = systemMessage ? [systemMessage] : null;
   
-  if (ws.connectionActive) {
-    sendToClient(ws, { conversationCleared: true });
-  }
+  sendToClient(ws, { conversationCleared: true });
 } 

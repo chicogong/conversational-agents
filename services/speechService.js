@@ -83,6 +83,46 @@ export function detectVoiceActivity(buffer) {
 }
 
 /**
+ * Gets the appropriate TTS endpoint URL based on region configuration
+ * @returns {string} TTS endpoint URL
+ */
+function getTTSEndpoint() {
+  const isChina = config.speech.region.includes('china') || 
+                 ['chinaeast', 'chinanorth', 'chinaeast2', 'chinanorth2'].includes(config.speech.region);
+  
+  return isChina 
+    ? `https://${config.speech.region}.tts.speech.azure.cn/cognitiveservices/v1`
+    : `https://${config.speech.region}.tts.speech.microsoft.com/cognitiveservices/v1`;
+}
+
+/**
+ * Builds SSML for text-to-speech
+ * @param {string} text - Text to convert to speech
+ * @returns {string} Formatted SSML
+ */
+function buildSSML(text) {
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${config.speech.language}">
+    <voice name="${config.speech.voice}">${text}</voice>
+  </speak>`;
+}
+
+/**
+ * Sends error notification to client via WebSocket
+ * @param {WebSocket} ws - WebSocket connection
+ * @param {string} message - Error message
+ * @param {string} details - Error details
+ */
+function sendErrorToClient(ws, message, details) {
+  if (!ws || !ws.connectionActive) return;
+  
+  try {
+    ws.send(JSON.stringify({ error: message, details }));
+  } catch (error) {
+    logger.error(`[${ws.connectionId}] Error sending error message to client: ${error.message}`);
+  }
+}
+
+/**
  * Converts text to speech using streaming HTTP and sends audio chunks to client
  * @param {string} text - Text to synthesize
  * @param {WebSocket} ws - WebSocket connection
@@ -94,25 +134,14 @@ export async function textToSpeech(text, ws) {
   }
   
   const startTime = Date.now();
-  logger.speech.info(`[${ws.connectionId}] Starting speech synthesis, text: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
+  const logText = text.length > 30 ? `${text.substring(0, 30)}...` : text;
+  logger.speech.info(`[${ws.connectionId}] Starting speech synthesis, text: "${logText}"`);
   
-  // Clean up existing synthesizer if present
-  if (ws.currentSynthesizer) {
-    try {
-      ws.currentSynthesizer.close();
-    } catch (error) {
-      logger.speech.warn(`[${ws.connectionId}] Error closing previous synthesizer: ${error.message}`);
-    }
-    ws.currentSynthesizer = null;
-  }
+  // Clean up existing synthesizer
+  cleanupSynthesizer(ws);
   
   try {
-    // Build SSML
-    const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${config.speech.language}">
-      <voice name="${config.speech.voice}">${text}</voice>
-    </speak>`;
-    
-    // Set up request headers
+    const ssml = buildSSML(text);
     const headers = {
       'Ocp-Apim-Subscription-Key': config.speech.key,
       'Content-Type': 'application/ssml+xml',
@@ -120,62 +149,33 @@ export async function textToSpeech(text, ws) {
       'Accept': 'audio/wav'
     };
     
-    // Construct the correct endpoint URL for Azure China
-    // China regions use the format: https://{region}.tts.speech.azure.cn/cognitiveservices/v1
-    const endpoint = `https://${config.speech.region}.tts.speech.azure.cn/cognitiveservices/v1`;
-    
+    const endpoint = getTTSEndpoint();
     logger.speech.debug(`[${ws.connectionId}] Using TTS endpoint: ${endpoint}`);
     
-    // Perform streaming HTTP request
     const response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: ssml,
-      timeout: 10000 // 10 second timeout
+      timeout: 10000
     });
     
     if (!response.ok) {
       const errorText = await response.text();
       logger.error(`[${ws.connectionId}] TTS request failed, status: ${response.status}, error: ${errorText}`);
-      
-      if (ws.connectionActive) {
-        try {
-          ws.send(JSON.stringify({
-            error: `Speech synthesis failed`,
-            details: `Status ${response.status}: ${errorText}`
-          }));
-        } catch (sendError) {
-          logger.error(`[${ws.connectionId}] Error sending TTS error to client: ${sendError.message}`);
-        }
-      }
+      sendErrorToClient(ws, `Speech synthesis failed`, `Status ${response.status}: ${errorText}`);
       return;
     }
     
-    // Get response as ArrayBuffer
     const buffer = await response.arrayBuffer();
     
-    // No audio data returned
     if (!buffer || buffer.byteLength === 0) {
-      logger.speech.warn(`[${ws.connectionId}] TTS response returned no audio data for text: "${text}"`);
-      if (ws.connectionActive) {
-        try {
-          ws.send(JSON.stringify({
-            error: 'Speech synthesis returned empty response',
-            details: 'No audio data received'
-          }));
-        } catch (sendError) {
-          logger.error(`[${ws.connectionId}] Error sending empty TTS notification: ${sendError.message}`);
-        }
-      }
+      logger.speech.warn(`[${ws.connectionId}] TTS response returned no audio data for text: "${logText}"`);
+      sendErrorToClient(ws, 'Speech synthesis returned empty response', 'No audio data received');
       return;
     }
     
-    // Create a Blob from the buffer and send it directly
-    // The client expects a Blob object for audio data
     if (ws.connectionActive) {
       try {
-        // For Node.js, we simply send the buffer directly
-        // WebSocket implementation will handle it correctly
         ws.send(Buffer.from(buffer));
       } catch (error) {
         logger.error(`[${ws.connectionId}] Error sending TTS audio: ${error.message}`);
@@ -187,16 +187,21 @@ export async function textToSpeech(text, ws) {
     
   } catch (error) {
     logger.error(`[${ws.connectionId}] TTS streaming error: ${error.message}`);
-    
-    if (ws.connectionActive) {
-      try {
-        ws.send(JSON.stringify({
-          error: 'Speech synthesis error',
-          details: error.message
-        }));
-      } catch (sendError) {
-        logger.error(`[${ws.connectionId}] Error sending TTS error to client: ${sendError.message}`);
-      }
+    sendErrorToClient(ws, 'Speech synthesis error', error.message);
+  }
+}
+
+/**
+ * Cleans up an existing synthesizer if present
+ * @param {WebSocket} ws - WebSocket connection with synthesizer property
+ */
+function cleanupSynthesizer(ws) {
+  if (ws.currentSynthesizer) {
+    try {
+      ws.currentSynthesizer.close();
+    } catch (error) {
+      logger.speech.warn(`[${ws.connectionId}] Error closing previous synthesizer: ${error.message}`);
     }
+    ws.currentSynthesizer = null;
   }
 } 

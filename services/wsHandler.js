@@ -8,8 +8,14 @@ const activeConnections = new Set();
 
 /**
  * Handles a new WebSocket connection
+ * @param {WebSocket} ws - WebSocket connection 
  */
 export function handleConnection(ws) {
+  if (!ws) {
+    logger.error('Received null WebSocket connection');
+    return;
+  }
+  
   logger.ws.info('New WebSocket connection established');
   
   // Add to active connections
@@ -21,13 +27,30 @@ export function handleConnection(ws) {
   let audioConfig = null;
   let recognizer = null;
   let audioDataReceived = false;
+  let pingInterval = null;
   
   // Initialize client state
-  ws.ttsPendingSentences = [];
-  ws.processingTTS = false;
-  ws.isUserSpeaking = false;
-  ws.connectionActive = true;
-  ws.connectionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+  initializeClientState(ws);
+
+  /**
+   * Initialize client state with default values
+   * @param {WebSocket} ws - WebSocket connection
+   */
+  function initializeClientState(ws) {
+    ws.ttsPendingSentences = [];
+    ws.processingTTS = false;
+    ws.isUserSpeaking = false;
+    ws.connectionActive = true;
+    ws.connectionId = generateConnectionId();
+  }
+  
+  /**
+   * Generate a unique connection ID
+   * @returns {string} Unique connection ID
+   */
+  function generateConnectionId() {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  }
 
   /**
    * Process incoming audio data
@@ -62,13 +85,14 @@ export function handleConnection(ws) {
       }
       return false;
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Error processing audio data:`, error);
+      logger.error(`[${ws.connectionId}] Error processing audio data: ${error.message}`);
       return false;
     }
   }
 
   /**
-   * Set up speech recognizer
+   * Set up speech recognizer with events and error handling
+   * @returns {Promise<void>}
    */
   async function setupRecognizer() {
     logger.speech.info(`[${ws.connectionId}] Setting up speech recognizer...`);
@@ -81,78 +105,103 @@ export function handleConnection(ws) {
       
       logger.speech.info(`[${ws.connectionId}] Successfully created speech recognizer and audio stream`);
 
-      // Configure recognition event handlers
-      recognizer.recognizing = (s, e) => {
-        if (e.result.text && ws.connectionActive) {
-          logger.speech.debug(`[${ws.connectionId}] Recognizing: ${e.result.text}`);
-          
-          // Interrupt current AI response
-          cancelOngoingActivities(ws);
-          
-          // Send intermediate results
-          sendToClient({ partialTranscription: e.result.text });
-        }
-      };
-
-      recognizer.recognized = (s, e) => {
-        if (e.result.text && ws.connectionActive) {
-          logger.speech.info(`[${ws.connectionId}] Recognition result: ${e.result.text}`);
-          
-          // Cancel ongoing responses
-          cancelOngoingActivities(ws);
-          
-          // Send final recognition result
-          sendToClient({ transcription: e.result.text });
-          
-          // Call language model
-          callLLM(e.result.text, ws);
-        } else {
-          logger.speech.debug(`[${ws.connectionId}] Recognition completed but no text result`);
-        }
-      };
-
-      recognizer.sessionStarted = () => {
-        logger.speech.info(`[${ws.connectionId}] Recognition session started`);
-        ws.isUserSpeaking = true;
-      };
-
-      recognizer.sessionStopped = () => {
-        logger.speech.info(`[${ws.connectionId}] Recognition session ended`);
-        ws.isUserSpeaking = false;
-      };
-
-      recognizer.canceled = (s, e) => {
-        logger.speech.error(`[${ws.connectionId}] Recognition canceled: ${e.errorDetails}`);
-      };
-
+      // Set up event handlers
+      setupRecognizerEvents();
+      
       // Start continuous recognition with timeout
-      await new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error("Speech recognition startup timeout"));
-        }, 5000);
-        
-        recognizer.startContinuousRecognitionAsync(
-          () => {
-            clearTimeout(timeoutId);
-            logger.speech.info(`[${ws.connectionId}] Continuous recognition started`);
-            resolve();
-          },
-          error => {
-            clearTimeout(timeoutId);
-            logger.error(`[${ws.connectionId}] Recognition error:`, error);
-            reject(error);
-          }
-        );
-      });
+      await startContinuousRecognition();
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Error setting up speech recognizer:`, error);
-      sendToClient({ error: `Failed to set up speech recognizer: ${error.message}` });
+      logger.error(`[${ws.connectionId}] Error setting up speech recognizer: ${error.message}`);
+      sendToClient({ 
+        error: `Failed to set up speech recognizer`, 
+        details: error.message 
+      });
       throw error;
     }
+  }
+  
+  /**
+   * Configure recognizer event handlers
+   */
+  function setupRecognizerEvents() {
+    if (!recognizer) return;
+    
+    recognizer.recognizing = (s, e) => {
+      if (e.result.text && ws.connectionActive) {
+        logger.speech.debug(`[${ws.connectionId}] Recognizing: ${e.result.text}`);
+        
+        // Interrupt current AI response
+        cancelOngoingActivities(ws);
+        
+        // Send intermediate results
+        sendToClient({ partialTranscription: e.result.text });
+      }
+    };
+
+    recognizer.recognized = (s, e) => {
+      if (e.result.text && ws.connectionActive) {
+        logger.speech.info(`[${ws.connectionId}] Recognition result: ${e.result.text}`);
+        
+        // Cancel ongoing responses
+        cancelOngoingActivities(ws);
+        
+        // Send final recognition result
+        sendToClient({ transcription: e.result.text });
+        
+        // Call language model
+        callLLM(e.result.text, ws);
+      } else {
+        logger.speech.debug(`[${ws.connectionId}] Recognition completed but no text result`);
+      }
+    };
+
+    recognizer.sessionStarted = () => {
+      logger.speech.info(`[${ws.connectionId}] Recognition session started`);
+      ws.isUserSpeaking = true;
+    };
+
+    recognizer.sessionStopped = () => {
+      logger.speech.info(`[${ws.connectionId}] Recognition session ended`);
+      ws.isUserSpeaking = false;
+    };
+
+    recognizer.canceled = (s, e) => {
+      logger.speech.error(`[${ws.connectionId}] Recognition canceled: ${e.errorDetails}`);
+    };
+  }
+  
+  /**
+   * Start continuous recognition with timeout
+   * @returns {Promise<void>}
+   */
+  async function startContinuousRecognition() {
+    if (!recognizer) {
+      throw new Error('Recognizer not initialized');
+    }
+    
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error("Speech recognition startup timeout"));
+      }, 5000);
+      
+      recognizer.startContinuousRecognitionAsync(
+        () => {
+          clearTimeout(timeoutId);
+          logger.speech.info(`[${ws.connectionId}] Continuous recognition started`);
+          resolve();
+        },
+        error => {
+          clearTimeout(timeoutId);
+          logger.error(`[${ws.connectionId}] Recognition error: ${error.message}`);
+          reject(error);
+        }
+      );
+    });
   }
 
   /**
    * Clean up resources
+   * @returns {Promise<void>}
    */
   async function cleanupResources() {
     try {
@@ -163,34 +212,7 @@ export function handleConnection(ws) {
       activeConnections.delete(ws);
       logger.ws.debug(`Connection closed. Active connections: ${activeConnections.size}`);
       
-      if (recognizer) {
-        await new Promise((resolve) => {
-          const timeoutId = setTimeout(() => {
-            logger.speech.warn(`[${ws.connectionId}] Stop recognition timeout, forcing close`);
-            if (recognizer) {
-              try { recognizer.close(); } catch (e) { 
-                logger.error(`[${ws.connectionId}] Error closing recognizer:`, e);
-              }
-            }
-            resolve();
-          }, 3000);
-          
-          recognizer.stopContinuousRecognitionAsync(
-            () => {
-              clearTimeout(timeoutId);
-              logger.speech.info(`[${ws.connectionId}] Recognizer stopped`);
-              recognizer.close();
-              resolve();
-            },
-            error => {
-              clearTimeout(timeoutId);
-              logger.error(`[${ws.connectionId}] Error stopping recognition:`, error);
-              try { recognizer.close(); } catch (e) { }
-              resolve(); // Continue cleanup even if error occurs
-            }
-          );
-        });
-      }
+      await stopRecognizer();
       
       // Reset all resources
       pushStream = null;
@@ -200,7 +222,52 @@ export function handleConnection(ws) {
       // Clean up TTS resources
       cancelOngoingActivities(ws, false);
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Error cleaning up resources:`, error);
+      logger.error(`[${ws.connectionId}] Error cleaning up resources: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Stop the recognizer with timeout
+   * @returns {Promise<void>}
+   */
+  async function stopRecognizer() {
+    if (!recognizer) return;
+    
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        logger.speech.warn(`[${ws.connectionId}] Stop recognition timeout, forcing close`);
+        closeRecognizer();
+        resolve();
+      }, 3000);
+      
+      recognizer.stopContinuousRecognitionAsync(
+        () => {
+          clearTimeout(timeoutId);
+          logger.speech.info(`[${ws.connectionId}] Recognizer stopped`);
+          closeRecognizer();
+          resolve();
+        },
+        error => {
+          clearTimeout(timeoutId);
+          logger.error(`[${ws.connectionId}] Error stopping recognition: ${error.message}`);
+          closeRecognizer();
+          resolve(); // Continue cleanup even if error occurs
+        }
+      );
+    });
+  }
+  
+  /**
+   * Close the recognizer object
+   */
+  function closeRecognizer() {
+    if (recognizer) {
+      try { 
+        recognizer.close(); 
+      } catch (e) { 
+        logger.error(`[${ws.connectionId}] Error closing recognizer: ${e.message}`);
+      }
+      recognizer = null;
     }
   }
 
@@ -209,33 +276,72 @@ export function handleConnection(ws) {
    * @param {Object} data - Data to send
    */
   function sendToClient(data) {
-    if (!ws.connectionActive) return;
+    if (!ws || !ws.connectionActive) return;
     
     try {
       ws.send(JSON.stringify(data));
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Error sending data to client:`, error);
+      logger.error(`[${ws.connectionId}] Error sending data to client: ${error.message}`);
     }
   }
-
-  // Add heartbeat detection
-  const pingInterval = setInterval(() => {
-    if (ws.readyState === ws.OPEN) {
-      try {
-        ws.ping();
-      } catch (e) {
-        logger.error(`[${ws.connectionId}] Heartbeat ping failed:`, e);
+  
+  /**
+   * Setup heart-beat mechanism
+   */
+  function setupHeartbeat() {
+    pingInterval = setInterval(() => {
+      if (ws.readyState === ws.OPEN) {
+        try {
+          ws.ping();
+        } catch (e) {
+          logger.error(`[${ws.connectionId}] Heartbeat ping failed: ${e.message}`);
+          clearInterval(pingInterval);
+          cleanupResources();
+        }
+      } else {
         clearInterval(pingInterval);
-        cleanupResources();
       }
-    } else {
-      clearInterval(pingInterval);
-    }
-  }, 30000);
+    }, 30000);
+  }
+  
+  /**
+   * Set up WebSocket event handlers
+   */
+  function setupWebSocketEvents() {
+    // Handle received audio data
+    ws.on('message', async (data) => {
+      if (!audioDataReceived && ws.connectionActive) {
+        audioDataReceived = true;
+        logger.ws.info(`[${ws.connectionId}] First audio data received, size: ${data.length} bytes`);
+      }
+      
+      await processAudioData(data);
+    });
 
-  // Initialize and set up handlers
+    // Handle connection close
+    ws.on('close', async (code, reason) => {
+      logger.ws.info(`[${ws.connectionId}] Connection closed with code: ${code}, reason: ${reason || 'none'}`);
+      clearInterval(pingInterval);
+      await cleanupResources();
+    });
+
+    // Handle errors
+    ws.on('error', async (error) => {
+      logger.error(`[${ws.connectionId}] Connection error: ${error.message}`);
+      clearInterval(pingInterval);
+      await cleanupResources();
+    });
+  }
+
+  // Initialize connection and set up handlers
   (async () => {
     try {
+      // Set up heartbeat
+      setupHeartbeat();
+      
+      // Set up WebSocket event handlers
+      setupWebSocketEvents();
+      
       // Initialize recognizer
       await setupRecognizer();
       
@@ -245,32 +351,8 @@ export function handleConnection(ws) {
         message: 'Server is ready, you can start the conversation',
         connectionId: ws.connectionId
       });
-
-      // Handle received audio data
-      ws.on('message', async (data) => {
-        if (!audioDataReceived && ws.connectionActive) {
-          audioDataReceived = true;
-          logger.ws.info(`[${ws.connectionId}] First audio data received, size: ${data.length} bytes`);
-        }
-        
-        await processAudioData(data);
-      });
-
-      // Handle connection close
-      ws.on('close', async (code, reason) => {
-        logger.ws.info(`[${ws.connectionId}] Connection closed with code: ${code}, reason: ${reason || 'none'}`);
-        clearInterval(pingInterval);
-        await cleanupResources();
-      });
-
-      // Handle errors
-      ws.on('error', (error) => {
-        logger.error(`[${ws.connectionId}] Connection error:`, error);
-        clearInterval(pingInterval);
-        cleanupResources();
-      });
     } catch (error) {
-      logger.error(`[${ws.connectionId}] Failed to handle WebSocket connection:`, error);
+      logger.error(`[${ws.connectionId}] Failed to handle WebSocket connection: ${error.message}`);
       clearInterval(pingInterval);
       cleanupResources();
     }
