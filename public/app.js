@@ -12,7 +12,7 @@ class ConversationalApp {
         this.stopButton = document.getElementById('stopButton');
         this.statusElement = document.getElementById('status');
         this.chatContainer = document.getElementById('chatContainer');
-        this.welcomeMessage = document.querySelector('.welcome-message');
+        this.welcomeMessage = document.querySelector('.welcome-card');
         
         // Initialize managers
         this.chatManager = new ChatManager('chatContainer');
