@@ -1,8 +1,14 @@
 /**
- * WebSocket client for handling server communication
+ * WebSocket client module
+ * Responsible for server communication and connection management
  */
+import SignalHandler from './signal-handler.js';
+import ConnectionConfig from './connection-config.js';
+
 class WebSocketClient {
     /**
+     * Initialize WebSocket client with event handlers
+     * 
      * @param {Object} handlers - Event handlers
      * @param {Function} handlers.onOpen - Connection open handler
      * @param {Function} handlers.onClose - Connection close handler
@@ -13,78 +19,78 @@ class WebSocketClient {
      * @param {Function} handlers.onAIResponse - AI response handler
      * @param {Function} handlers.onInterrupt - Interrupt signal handler
      * @param {Function} handlers.onServerError - Server error handler
-     * @param {Function} handlers.onServerStatus - Server status handler
      */
     constructor(handlers = {}) {
         this.websocket = null;
         this.handlers = handlers;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
+        this.maxReconnectAttempts = ConnectionConfig.CONNECTION.MAX_RECONNECT_ATTEMPTS;
         this.reconnectTimeout = null;
+        this.signalHandler = new SignalHandler(handlers);
     }
 
     /**
      * Initialize WebSocket connection
-     * @returns {Promise<void>}
+     * @returns {Promise<void>} Promise that resolves when connection is established
      */
     connect() {
         return new Promise((resolve, reject) => {
-            if (this.websocket) {
-                this.websocket.close();
-            }
+            this._closeExistingConnection();
             
-            // Use the same protocol and host as the current page
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}`;
-            console.log('[WebSocket] Connecting to:', wsUrl);
+            // Get WebSocket URL from configuration
+            const wsUrl = ConnectionConfig.getWebSocketUrl();
             
             this.websocket = new WebSocket(wsUrl);
             
             const connectionTimeout = setTimeout(() => {
-                if (this.websocket.readyState !== WebSocket.OPEN) {
+                if (this.websocket && this.websocket.readyState !== WebSocket.OPEN) {
                     reject(new Error('Connection timeout'));
                     this.websocket.close();
                 }
-            }, 5000);
+            }, ConnectionConfig.CONNECTION.TIMEOUT);
             
-            this.websocket.onopen = () => {
-                console.log('[WebSocket] Connection established');
-                clearTimeout(connectionTimeout);
-                this.reconnectAttempts = 0;
-                
-                if (this.handlers.onOpen) {
-                    this.handlers.onOpen();
-                }
-                
-                resolve();
-            };
-
-            this.websocket.onmessage = (event) => {
-                this._handleMessage(event);
-            };
-
-            this.websocket.onclose = (event) => {
-                console.log('[WebSocket] Connection closed', event.code, event.reason);
-                clearTimeout(connectionTimeout);
-                
-                if (this.handlers.onClose) {
-                    this.handlers.onClose();
-                }
-                
-                this._scheduleReconnect();
-            };
-
-            this.websocket.onerror = (error) => {
-                console.error('[Error] WebSocket error:', error);
-                clearTimeout(connectionTimeout);
-                
-                if (this.handlers.onError) {
-                    this.handlers.onError(error);
-                }
-                
-                reject(error);
-            };
+            this._setupEventHandlers(connectionTimeout, resolve, reject);
         });
+    }
+    
+    /**
+     * Set up WebSocket event handlers
+     * @private
+     * @param {number} connectionTimeout - Timeout ID
+     * @param {Function} resolve - Promise resolve function
+     * @param {Function} reject - Promise reject function
+     */
+    _setupEventHandlers(connectionTimeout, resolve, reject) {
+        this.websocket.onopen = () => {
+            clearTimeout(connectionTimeout);
+            this.reconnectAttempts = 0;
+            if (this.handlers.onOpen) this.handlers.onOpen();
+            resolve();
+        };
+
+        this.websocket.onmessage = (event) => this.signalHandler.processMessage(event);
+
+        this.websocket.onclose = () => {
+            clearTimeout(connectionTimeout);
+            if (this.handlers.onClose) this.handlers.onClose();
+            this._scheduleReconnect();
+        };
+
+        this.websocket.onerror = (error) => {
+            clearTimeout(connectionTimeout);
+            if (this.handlers.onError) this.handlers.onError(error);
+            reject(error);
+        };
+    }
+    
+    /**
+     * Close existing connection if any
+     * @private
+     */
+    _closeExistingConnection() {
+        if (this.websocket) {
+            this.websocket.close();
+        }
     }
 
     /**
@@ -117,68 +123,27 @@ class WebSocketClient {
 
     /**
      * Check if WebSocket is connected
-     * @returns {boolean}
+     * @returns {boolean} True if connected
      */
     isConnected() {
         return this.websocket && this.websocket.readyState === WebSocket.OPEN;
     }
 
     /**
-     * Handle WebSocket messages
-     * @param {MessageEvent} event - WebSocket message event
-     * @private
-     */
-    _handleMessage(event) {
-        // Check if the message is binary data (audio)
-        if (event.data instanceof Blob) {
-            if (this.handlers.onAudioData) {
-                this.handlers.onAudioData(event.data);
-            }
-            return;
-        }
-        
-        // Handle JSON messages
-        try {
-            const data = JSON.parse(event.data);
-            
-            if (data.status && this.handlers.onServerStatus) {
-                this.handlers.onServerStatus(data.message);
-            } else if (data.transcription && this.handlers.onTranscription) {
-                this.handlers.onTranscription(data.transcription);
-            } else if (data.partialTranscription && this.handlers.onPartialTranscription) {
-                this.handlers.onPartialTranscription(data.partialTranscription);
-            } else if (data.llmResponse && this.handlers.onAIResponse) {
-                this.handlers.onAIResponse(data.llmResponse);
-            } else if (data.interrupt && this.handlers.onInterrupt) {
-                this.handlers.onInterrupt();
-            } else if (data.error && this.handlers.onServerError) {
-                this.handlers.onServerError(data.error);
-            }
-        } catch (error) {
-            console.error('[Error] Failed to parse server message:', error, event.data);
-        }
-    }
-
-    /**
-     * Schedule a reconnection attempt
+     * Schedule a reconnection attempt with exponential backoff
      * @private
      */
     _scheduleReconnect() {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('[WebSocket] Maximum reconnection attempts reached');
-            return;
-        }
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
         
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-        console.log(`[WebSocket] Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+        const delay = Math.min(
+            ConnectionConfig.CONNECTION.RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts),
+            ConnectionConfig.CONNECTION.MAX_RECONNECT_DELAY
+        );
         
         this.reconnectTimeout = setTimeout(() => {
             this.reconnectAttempts++;
-            console.log(`[WebSocket] Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-            
-            this.connect().catch(error => {
-                console.error('[WebSocket] Reconnection failed:', error);
-            });
+            this.connect().catch(() => {});
         }, delay);
     }
 }

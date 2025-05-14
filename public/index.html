@@ -3,40 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能语音助手</title>
+    <title>AI 实时语音对话</title>
+    <!-- Styles -->
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="app-container">
-        <div class="header">
-            <h1>语音助手 <span class="subtitle">小蕊</span></h1>
-        </div>
+        <header class="header">
+            <h1><i class="fas fa-comment-dots"></i> AI 实时语音对话</h1>
+        </header>
 
-        <div class="chat-container" id="chatContainer">
-            <div class="welcome-message">
-                <div class="welcome-icon">
-                    <i class="fas fa-comments"></i>
+        <div class="main-content">
+            <div class="chat-container" id="chatContainer">
+                <div class="welcome-card">
+                    <div class="card-header">
+                        <i class="fas fa-robot"></i> 欢迎使用
+                    </div>
+                    <div class="card-body">
+                        <p>点击下方按钮开始对话</p>
+                    </div>
                 </div>
-                <h2>欢迎使用智能语音助手</h2>
-                <p>点击下方"开始对话"按钮，即可与小蕊对话</p>
             </div>
-        </div>
-
-        <div class="controls">
-            <div class="status" id="status">就绪</div>
-            <button id="startButton" class="start-button">
-                <i class="fas fa-microphone"></i>
-                开始对话
-            </button>
-            <button id="stopButton" class="stop-button" disabled>
-                <i class="fas fa-stop"></i>
-                结束对话
-            </button>
+            
+            <div class="controls">
+                <div class="status-badge" id="status">就绪</div>
+                <div class="button-group">
+                    <button id="startButton" class="btn btn-primary">
+                        <i class="fas fa-microphone"></i> 开始对话
+                    </button>
+                    <button id="stopButton" class="btn btn-danger" disabled>
+                        <i class="fas fa-stop"></i> 结束对话
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
     
-    <!-- Application scripts -->
+    <!-- Application Scripts -->
     <script type="module" src="app.js"></script>
 </body>
 </html>
