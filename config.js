@@ -38,6 +38,27 @@ const config = {
     }
   },
   
+  // Service providers configuration
+  services: {
+    // ASR service configuration
+    asr: {
+      provider: process.env.ASR_PROVIDER || 'azure',
+      // Additional provider-specific config can be added here
+    },
+    
+    // TTS service configuration
+    tts: {
+      provider: process.env.TTS_PROVIDER || 'azure',
+      // Additional provider-specific config can be added here
+    },
+    
+    // LLM service configuration
+    llm: {
+      provider: process.env.LLM_PROVIDER || 'openai',
+      // Additional provider-specific config can be added here
+    }
+  },
+  
   // Azure Speech Service configuration
   speech: {
     key: process.env.AZURE_SPEECH_KEY,

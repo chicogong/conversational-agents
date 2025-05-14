@@ -1,8 +1,6 @@
 import { WebSocket } from 'ws';
 import logger from './logger.js';
-import { asrService } from './asrService.js';
-import { ttsService } from './ttsService.js';
-import { llmService } from './llmService.js';
+import { serviceRegistry } from './serviceRegistry.js';
 
 // Track active connections for monitoring
 const activeConnections = new Set();
@@ -87,8 +85,8 @@ async function processAudioData(data, ws) {
     
     const buffer = Buffer.from(data);
     
-    // Process audio via ASR Service
-    return asrService.processAudioData(buffer, ws);
+    // Process audio via ASR Provider
+    return serviceRegistry.getASR().processAudioData(buffer, ws);
   } catch (error) {
     logger.error(`[${ws.connectionId}] Error processing audio data: ${error.message}`);
     return false;
@@ -110,13 +108,13 @@ async function cleanupResources(ws) {
     logger.ws.debug(`Connection closed. Active connections: ${activeConnections.size}`);
     
     // Clean up ASR resources
-    await asrService.cleanup(ws);
+    await serviceRegistry.getASR().cleanup(ws);
     
     // Clean up TTS resources
-    ttsService.cleanup(ws);
+    await serviceRegistry.getTTS().cleanup(ws);
     
     // Clean up LLM resources
-    llmService.cleanup(ws);
+    await serviceRegistry.getLLM().cleanup(ws);
   } catch (error) {
     logger.error(`[${ws.connectionId}] Error cleaning up resources: ${error.message}`);
   }
@@ -168,27 +166,27 @@ function handleClientMessage(ws, message) {
           break;
           
         case 'clearConversation':
-          llmService.clearConversationHistory(ws);
+          serviceRegistry.getLLM().clearConversationHistory(ws);
           sendToClient(ws, createMessage('conversationCleared'));
           break;
           
         case 'getConversation':
-          const history = llmService.getConversationHistory(ws);
+          const history = serviceRegistry.getLLM().getConversationHistory(ws);
           sendToClient(ws, createMessage('conversationHistory', history));
           break;
           
         case 'textInput':
           if (data.payload && typeof data.payload === 'string') {
-            llmService.processUserInput(data.payload, ws);
+            serviceRegistry.getLLM().processUserInput(data.payload, ws);
           }
           break;
           
         case 'startRecognition':
-          asrService.startRecognition(ws);
+          serviceRegistry.getASR().startRecognition(ws);
           break;
           
         case 'stopRecognition':
-          asrService.stopRecognition(ws);
+          serviceRegistry.getASR().stopRecognition(ws);
           break;
           
         default:
@@ -205,89 +203,88 @@ function handleClientMessage(ws, message) {
  * @param {WebSocket} ws - WebSocket connection
  */
 function setupWebSocketEvents(ws) {
-  // Initialize connection
-  initializeClientState(ws);
-  setupHeartbeat(ws);
-  
-  // Add to active connections
-  activeConnections.add(ws);
-  logger.ws.debug(`Active connections: ${activeConnections.size}`);
-  
-  // Set up speech recognition
-  asrService.setupRecognizer(ws)
-    .then(() => {
-      logger.speech.info(`[${ws.connectionId}] Speech recognition ready`);
-      sendToClient(ws, createMessage('ready'));
-    })
-    .catch(error => {
-      logger.error(`[${ws.connectionId}] Failed to initialize speech recognition: ${error.message}`);
-      sendToClient(ws, createMessage('error', 'Failed to initialize speech recognition', { details: error.message }));
-    });
-  
-  // Handle incoming messages
-  ws.on('message', (message) => handleClientMessage(ws, message));
+  // Handle messages
+  ws.on('message', (message) => {
+    handleClientMessage(ws, message);
+  });
   
   // Handle connection close
-  ws.on('close', () => {
+  ws.on('close', async () => {
     logger.ws.info(`[${ws.connectionId}] WebSocket connection closed`);
-    cleanupResources(ws);
+    await cleanupResources(ws);
   });
   
   // Handle connection errors
-  ws.on('error', (error) => {
+  ws.on('error', async (error) => {
     logger.error(`[${ws.connectionId}] WebSocket error: ${error.message}`);
-    cleanupResources(ws);
+    await cleanupResources(ws);
   });
+  
+  // Set up heartbeat mechanism
+  setupHeartbeat(ws);
 }
 
 /**
- * Handles a new WebSocket connection
- * @param {WebSocket} ws - WebSocket connection 
+ * Handle new WebSocket connections
+ * @param {WebSocket} ws - WebSocket connection
  */
 export function handleConnection(ws) {
-  if (!ws) {
-    logger.error('Received null WebSocket connection');
-    return;
-  }
+  // Initialize client state
+  initializeClientState(ws);
   
-  logger.ws.info('New WebSocket connection established');
+  // Add to active connections
+  activeConnections.add(ws);
+  
+  // Set up WebSocket event handlers
   setupWebSocketEvents(ws);
+  
+  // Log connection
+  logger.ws.info(`[${ws.connectionId}] New WebSocket connection established`);
+  logger.ws.debug(`Active connections: ${activeConnections.size}`);
+  
+  // Send welcome message
+  sendToClient(ws, createMessage('connected', { 
+    id: ws.connectionId, 
+    timestamp: Date.now() 
+  }));
+  
+  // 自动启动语音识别
+  serviceRegistry.getASR().startRecognition(ws);
 }
 
 /**
- * Cancels all ongoing activities for a connection
- * This is exposed for other services to use
+ * Cancel ongoing activities across all services
  * @param {WebSocket} ws - WebSocket connection
  * @param {boolean} sendInterrupt - Whether to send interrupt signal to client
  */
 export function cancelOngoingActivities(ws, sendInterrupt = true) {
-  if (!ws) return;
+  if (!ws || !ws.connectionActive) return;
   
-  // Cancel LLM stream
-  llmService.cancelActivities(ws);
+  // Cancel LLM processing
+  serviceRegistry.getLLM().cancelActivities(ws);
   
   // Cancel TTS processing
-  ttsService.cancelTTS(ws);
+  serviceRegistry.getTTS().cancelTTS(ws);
   
-  // Send interrupt signal to client
-  if (sendInterrupt && ws.connectionActive) {
-    sendToClient(ws, createMessage('interrupt'));
+  // Notify client of interruption if needed
+  if (sendInterrupt) {
+    sendToClient(ws, createMessage('interrupted'));
   }
 }
 
 /**
- * Get the current count of active connections
- * @returns {number} Number of active connections
+ * Get the number of active WebSocket connections
+ * @returns {number} Count of active connections
  */
 export function getActiveConnectionCount() {
   return activeConnections.size;
 }
 
-// Export the WebSocket service
+// Export websocket service
 export const wsService = {
   handleConnection,
+  cancelOngoingActivities,
   sendToClient,
   createMessage,
-  cancelOngoingActivities,
   getActiveConnectionCount
 }; 
