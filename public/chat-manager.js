@@ -1,8 +1,11 @@
 /**
- * Chat UI manager for handling conversation display
+ * Chat UI Manager Module
+ * Handles the display and management of conversation messages in the UI
  */
 class ChatManager {
     /**
+     * Create a new Chat Manager
+     * 
      * @param {string} chatContainerId - ID of the chat container element
      */
     constructor(chatContainerId) {
@@ -12,14 +15,19 @@ class ChatManager {
         
         // Message bubble tracking
         this.bubbles = {
-            partial: null,  // Current partial user message
-            lastUser: null, // Last complete user message
-            currentAI: null // Current AI response
+            partial: null,  // Current partial user message bubble ID
+            lastUser: null, // Last complete user message bubble ID
+            currentAI: null // Current AI response bubble ID
         };
     }
 
+    // =============================================
+    // Message Bubble Management
+    // =============================================
+
     /**
-     * Create a new message bubble
+     * Create a new message bubble in the UI
+     * 
      * @param {string} text - Message text
      * @param {boolean} isUser - Whether the message is from the user
      * @param {boolean} isPartial - Whether the message is a partial result
@@ -56,7 +64,8 @@ class ChatManager {
     }
     
     /**
-     * Update an existing bubble
+     * Update text in an existing message bubble
+     * 
      * @param {string} bubbleId - Bubble ID to update
      * @param {string} text - New message text
      * @param {boolean} isPartial - Whether it's still a partial message
@@ -84,9 +93,15 @@ class ChatManager {
         return true;
     }
     
+    // =============================================
+    // Message Handlers
+    // =============================================
+    
     /**
      * Handle partial speech recognition results
-     * @param {string} text - Recognized text
+     * Updates or creates a user message bubble with partial text
+     * 
+     * @param {string} text - Partial recognized text
      */
     handlePartialTranscription(text) {
         if (!text.trim()) return;
@@ -100,7 +115,9 @@ class ChatManager {
     
     /**
      * Handle final speech recognition results
-     * @param {string} text - Recognized text
+     * Updates or creates a user message bubble with final text
+     * 
+     * @param {string} text - Final recognized text
      */
     handleFinalTranscription(text) {
         if (!text.trim()) return;
@@ -126,6 +143,8 @@ class ChatManager {
     
     /**
      * Handle AI responses
+     * Updates or creates an AI message bubble with response text
+     * 
      * @param {string} text - Response text
      */
     handleAIResponse(text) {
@@ -139,6 +158,10 @@ class ChatManager {
         
         this.hideTypingIndicator();
     }
+    
+    // =============================================
+    // UI Helpers
+    // =============================================
     
     /**
      * Show typing indicator for AI response

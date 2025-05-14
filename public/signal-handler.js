@@ -1,5 +1,11 @@
 /**
+ * WebSocket message handler module
+ * Processes and routes messages received from the server
+ */
+
+/**
  * Message types for WebSocket communication
+ * @readonly
  * @enum {string}
  */
 const MessageType = {
@@ -12,10 +18,12 @@ const MessageType = {
 };
 
 /**
- * Signal handler for processing WebSocket messages
+ * Signal handler for processing WebSocket messages and routing to appropriate handlers
  */
 class SignalHandler {
     /**
+     * Create a new Signal Handler
+     * 
      * @param {Object} handlers - Event handlers
      * @param {Function} handlers.onAudioData - Audio data handler
      * @param {Function} handlers.onTranscription - Final transcription handler
@@ -29,22 +37,43 @@ class SignalHandler {
     }
 
     /**
-     * Process incoming WebSocket message
+     * Process incoming WebSocket message and route to appropriate handler
+     * 
      * @param {MessageEvent} event - WebSocket message event
      * @returns {void}
      */
     processMessage(event) {
         // Handle binary data (audio)
         if (event.data instanceof Blob) {
-            if (this.handlers.onAudioData) {
-                this.handlers.onAudioData(event.data);
-            }
+            this._handleBinaryData(event.data);
             return;
         }
         
         // Handle JSON messages
+        this._handleJSONMessage(event.data);
+    }
+    
+    /**
+     * Handle binary data (typically audio)
+     * 
+     * @param {Blob} data - Binary data
+     * @private
+     */
+    _handleBinaryData(data) {
+        if (this.handlers.onAudioData) {
+            this.handlers.onAudioData(data);
+        }
+    }
+    
+    /**
+     * Handle JSON message from server
+     * 
+     * @param {string} jsonData - JSON string data
+     * @private
+     */
+    _handleJSONMessage(jsonData) {
         try {
-            const data = JSON.parse(event.data);
+            const data = JSON.parse(jsonData);
             const messageType = this._getMessageType(data);
             const payload = this._getPayload(data, messageType);
             
@@ -55,7 +84,8 @@ class SignalHandler {
     }
 
     /**
-     * Dispatch message to appropriate handler
+     * Dispatch message to appropriate handler based on type
+     * 
      * @param {string} type - Message type
      * @param {*} payload - Message payload
      * @private
@@ -104,6 +134,8 @@ class SignalHandler {
 
     /**
      * Determine message type from the data structure
+     * Supports both new and legacy message formats
+     * 
      * @param {Object} data - Message data
      * @returns {string} Message type
      * @private
@@ -125,6 +157,7 @@ class SignalHandler {
     
     /**
      * Get payload from either new format or legacy format
+     * 
      * @param {Object} data - Message data
      * @param {string} type - Message type
      * @returns {*} Payload data

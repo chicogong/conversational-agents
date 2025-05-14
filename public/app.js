@@ -1,15 +1,21 @@
+/**
+ * Main application entry point
+ * Initializes and coordinates all components of the conversational AI app
+ */
 import WebSocketClient from './websocket-client.js';
 import AudioHandler from './audio-handler.js';
 import ChatManager from './chat-manager.js';
 
-/**
- * Main application class for conversational AI app
- */
 class ConversationalApp {
     /**
      * Initialize the application
      */
     constructor() {
+        this.elements = null;
+        this.chatManager = null;
+        this.webSocketClient = null;
+        this.audioHandler = null;
+        
         this.initializeUI();
         this.initializeManagers();
         this.bindEventHandlers();
@@ -17,7 +23,7 @@ class ConversationalApp {
     }
     
     /**
-     * Initialize UI elements
+     * Initialize UI elements and store references
      */
     initializeUI() {
         this.elements = {
@@ -35,16 +41,14 @@ class ConversationalApp {
     }
     
     /**
-     * Initialize manager objects
+     * Initialize manager components
      */
     initializeManagers() {
         this.chatManager = new ChatManager('chatContainer');
-        this.webSocketClient = null;
-        this.audioHandler = null;
     }
     
     /**
-     * Bind event handlers
+     * Bind UI event handlers
      */
     bindEventHandlers() {
         this.elements.startButton.addEventListener('click', () => this.startConversation());
@@ -52,7 +56,7 @@ class ConversationalApp {
     }
     
     /**
-     * Initialize the application
+     * Initialize the application and establish connection
      */
     async init() {
         this.updateStatus('连接中...');
@@ -68,10 +72,22 @@ class ConversationalApp {
     }
     
     /**
-     * Initialize WebSocket connection
+     * Initialize WebSocket connection and handlers
      */
     async initWebSocket() {
-        const handlers = {
+        const handlers = this.createWebSocketHandlers();
+        
+        this.webSocketClient = new WebSocketClient(handlers);
+        await this.webSocketClient.connect();
+        this.audioHandler = new AudioHandler(this.webSocketClient.websocket);
+    }
+    
+    /**
+     * Create WebSocket event handlers
+     * @returns {Object} Handler functions
+     */
+    createWebSocketHandlers() {
+        return {
             onOpen: () => {
                 this.updateStatus('已连接');
                 this.enableStartButton();
@@ -109,10 +125,6 @@ class ConversationalApp {
                 console.error('[Server Error]', error);
             }
         };
-        
-        this.webSocketClient = new WebSocketClient(handlers);
-        await this.webSocketClient.connect();
-        this.audioHandler = new AudioHandler(this.webSocketClient.websocket);
     }
     
     /**
@@ -152,6 +164,8 @@ class ConversationalApp {
         this.elements.stopButton.disabled = true;
         this.updateStatus('对话已结束');
     }
+    
+    // UI Helper Methods
     
     /**
      * Hide welcome message when conversation starts

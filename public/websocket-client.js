@@ -1,11 +1,14 @@
+/**
+ * WebSocket client module
+ * Responsible for server communication and connection management
+ */
 import SignalHandler from './signal-handler.js';
 import ConnectionConfig from './connection-config.js';
 
-/**
- * WebSocket client for handling server communication
- */
 class WebSocketClient {
     /**
+     * Initialize WebSocket client with event handlers
+     * 
      * @param {Object} handlers - Event handlers
      * @param {Function} handlers.onOpen - Connection open handler
      * @param {Function} handlers.onClose - Connection close handler
@@ -28,13 +31,11 @@ class WebSocketClient {
 
     /**
      * Initialize WebSocket connection
-     * @returns {Promise<void>}
+     * @returns {Promise<void>} Promise that resolves when connection is established
      */
     connect() {
         return new Promise((resolve, reject) => {
-            if (this.websocket) {
-                this.websocket.close();
-            }
+            this._closeExistingConnection();
             
             // Get WebSocket URL from configuration
             const wsUrl = ConnectionConfig.getWebSocketUrl();
@@ -48,27 +49,48 @@ class WebSocketClient {
                 }
             }, ConnectionConfig.CONNECTION.TIMEOUT);
             
-            this.websocket.onopen = () => {
-                clearTimeout(connectionTimeout);
-                this.reconnectAttempts = 0;
-                if (this.handlers.onOpen) this.handlers.onOpen();
-                resolve();
-            };
-
-            this.websocket.onmessage = (event) => this.signalHandler.processMessage(event);
-
-            this.websocket.onclose = () => {
-                clearTimeout(connectionTimeout);
-                if (this.handlers.onClose) this.handlers.onClose();
-                this._scheduleReconnect();
-            };
-
-            this.websocket.onerror = (error) => {
-                clearTimeout(connectionTimeout);
-                if (this.handlers.onError) this.handlers.onError(error);
-                reject(error);
-            };
+            this._setupEventHandlers(connectionTimeout, resolve, reject);
         });
+    }
+    
+    /**
+     * Set up WebSocket event handlers
+     * @private
+     * @param {number} connectionTimeout - Timeout ID
+     * @param {Function} resolve - Promise resolve function
+     * @param {Function} reject - Promise reject function
+     */
+    _setupEventHandlers(connectionTimeout, resolve, reject) {
+        this.websocket.onopen = () => {
+            clearTimeout(connectionTimeout);
+            this.reconnectAttempts = 0;
+            if (this.handlers.onOpen) this.handlers.onOpen();
+            resolve();
+        };
+
+        this.websocket.onmessage = (event) => this.signalHandler.processMessage(event);
+
+        this.websocket.onclose = () => {
+            clearTimeout(connectionTimeout);
+            if (this.handlers.onClose) this.handlers.onClose();
+            this._scheduleReconnect();
+        };
+
+        this.websocket.onerror = (error) => {
+            clearTimeout(connectionTimeout);
+            if (this.handlers.onError) this.handlers.onError(error);
+            reject(error);
+        };
+    }
+    
+    /**
+     * Close existing connection if any
+     * @private
+     */
+    _closeExistingConnection() {
+        if (this.websocket) {
+            this.websocket.close();
+        }
     }
 
     /**
@@ -101,14 +123,14 @@ class WebSocketClient {
 
     /**
      * Check if WebSocket is connected
-     * @returns {boolean}
+     * @returns {boolean} True if connected
      */
     isConnected() {
         return this.websocket && this.websocket.readyState === WebSocket.OPEN;
     }
 
     /**
-     * Schedule a reconnection attempt
+     * Schedule a reconnection attempt with exponential backoff
      * @private
      */
     _scheduleReconnect() {
