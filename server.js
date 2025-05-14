@@ -94,11 +94,9 @@ function setupProcessHandlers(services) {
 function startServer(server) {
   return new Promise((resolve, reject) => {
     server.listen(config.server.port, config.server.host, () => {
-      logger.info(`Server running at http://${config.server.host}:${config.server.port}`);
-      logger.info('WebSocket service enabled on the same port');
-      logger.info('Azure Speech Recognition service enabled');
-      logger.info(`Using OpenAI model: ${config.openai.model}`);
-      logger.info(`Using Azure region: ${config.speech.region}`);
+      logger.info(`Server running at http://${config.server.host}:${config.server.port} | ` +
+        `WebSocket service enabled | Azure Speech Recognition service enabled | ` +
+        `Using OpenAI model: ${config.openai.model} | Using Azure region: ${config.speech.region}`);
       resolve();
     });
     
