@@ -1,16 +1,21 @@
 /**
- * Chat UI manager
+ * Chat UI manager for handling conversation display
  */
 class ChatManager {
+    /**
+     * @param {string} chatContainerId - ID of the chat container element
+     */
     constructor(chatContainerId) {
         this.chatContainer = document.getElementById(chatContainerId);
         this.messageCounter = 0;
         this.isTyping = false;
         
-        // Track current message bubbles
-        this.partialBubbleId = null;   // ID for user partial messages
-        this.currentAIBubbleId = null; // ID for current AI response (may be updated)
-        this.lastUserBubbleId = null;  // ID for last complete user message
+        // Message bubble tracking
+        this.bubbles = {
+            partial: null,  // Current partial user message
+            lastUser: null, // Last complete user message
+            currentAI: null // Current AI response
+        };
     }
 
     /**
@@ -20,7 +25,7 @@ class ChatManager {
      * @param {boolean} isPartial - Whether the message is a partial result
      * @returns {string} Generated bubble ID
      */
-    createBubble(text, isUser, isPartial) {
+    createBubble(text, isUser, isPartial = false) {
         const bubbleType = isUser ? 'user' : 'ai';
         this.messageCounter++;
         const bubbleId = `msg-${bubbleType}-${this.messageCounter}`;
@@ -31,13 +36,12 @@ class ChatManager {
         
         if (isPartial) {
             bubbleDiv.classList.add('partial-message');
-            this.partialBubbleId = bubbleId;
+            this.bubbles.partial = bubbleId;
         } else if (isUser) {
-            this.lastUserBubbleId = bubbleId;
-            this.partialBubbleId = null; // Clear partial bubble reference
+            this.bubbles.lastUser = bubbleId;
+            this.bubbles.partial = null;
         } else {
-            // For AI responses
-            this.currentAIBubbleId = bubbleId;
+            this.bubbles.currentAI = bubbleId;
         }
         
         const contentDiv = document.createElement('div');
@@ -46,6 +50,7 @@ class ChatManager {
         
         bubbleDiv.appendChild(contentDiv);
         this.chatContainer.appendChild(bubbleDiv);
+        this.scrollToBottom();
         
         return bubbleId;
     }
@@ -57,7 +62,7 @@ class ChatManager {
      * @param {boolean} isPartial - Whether it's still a partial message
      * @returns {boolean} Success status
      */
-    updateBubble(bubbleId, text, isPartial) {
+    updateBubble(bubbleId, text, isPartial = false) {
         const bubbleDiv = document.getElementById(bubbleId);
         if (!bubbleDiv) return false;
         
@@ -70,12 +75,12 @@ class ChatManager {
             bubbleDiv.classList.add('partial-message');
         } else {
             bubbleDiv.classList.remove('partial-message');
-            // Only clear partial if it's a user message
             if (bubbleDiv.classList.contains('user-message')) {
-                this.partialBubbleId = null;
+                this.bubbles.partial = null;
             }
         }
         
+        this.scrollToBottom();
         return true;
     }
     
@@ -84,14 +89,13 @@ class ChatManager {
      * @param {string} text - Recognized text
      */
     handlePartialTranscription(text) {
-        if (this.partialBubbleId) {
-            // Update existing partial bubble
-            this.updateBubble(this.partialBubbleId, text, true);
+        if (!text.trim()) return;
+        
+        if (this.bubbles.partial) {
+            this.updateBubble(this.bubbles.partial, text, true);
         } else {
-            // Create new partial bubble
             this.createBubble(text, true, true);
         }
-        this.scrollToBottom();
     }
     
     /**
@@ -99,25 +103,25 @@ class ChatManager {
      * @param {string} text - Recognized text
      */
     handleFinalTranscription(text) {
-        if (this.partialBubbleId) {
-            // Convert partial bubble to final
-            const updated = this.updateBubble(this.partialBubbleId, text, false);
+        if (!text.trim()) return;
+        
+        if (this.bubbles.partial) {
+            const updated = this.updateBubble(this.bubbles.partial, text, false);
             if (updated) {
-                this.lastUserBubbleId = this.partialBubbleId;
-                this.partialBubbleId = null;
+                this.bubbles.lastUser = this.bubbles.partial;
+                this.bubbles.partial = null;
             } else {
-                // If update failed, create new bubble
                 this.createBubble(text, true, false);
             }
         } else {
-            // Create new final bubble
             this.createBubble(text, true, false);
         }
         
         // Reset AI bubble when user sends a new message
-        this.currentAIBubbleId = null;
+        this.bubbles.currentAI = null;
         
-        this.scrollToBottom();
+        // Show typing indicator for AI response
+        this.showTypingIndicator();
     }
     
     /**
@@ -125,18 +129,19 @@ class ChatManager {
      * @param {string} text - Response text
      */
     handleAIResponse(text) {
-        if (this.currentAIBubbleId) {
-            // Update existing AI bubble
-            this.updateBubble(this.currentAIBubbleId, text, false);
+        if (!text.trim()) return;
+        
+        if (this.bubbles.currentAI) {
+            this.updateBubble(this.bubbles.currentAI, text, false);
         } else {
-            // Create new AI bubble
             this.createBubble(text, false, false);
         }
-        this.scrollToBottom();
+        
+        this.hideTypingIndicator();
     }
     
     /**
-     * Show typing indicator
+     * Show typing indicator for AI response
      */
     showTypingIndicator() {
         if (this.isTyping) return;

@@ -21,7 +21,7 @@ class WebSocketClient {
         this.websocket = null;
         this.handlers = handlers;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = ConnectionConfig.MAX_RECONNECT_ATTEMPTS;
+        this.maxReconnectAttempts = ConnectionConfig.CONNECTION.MAX_RECONNECT_ATTEMPTS;
         this.reconnectTimeout = null;
         this.signalHandler = new SignalHandler(handlers);
     }
@@ -42,11 +42,11 @@ class WebSocketClient {
             this.websocket = new WebSocket(wsUrl);
             
             const connectionTimeout = setTimeout(() => {
-                if (this.websocket.readyState !== WebSocket.OPEN) {
+                if (this.websocket && this.websocket.readyState !== WebSocket.OPEN) {
                     reject(new Error('Connection timeout'));
                     this.websocket.close();
                 }
-            }, ConnectionConfig.CONNECTION_TIMEOUT);
+            }, ConnectionConfig.CONNECTION.TIMEOUT);
             
             this.websocket.onopen = () => {
                 clearTimeout(connectionTimeout);
@@ -115,8 +115,8 @@ class WebSocketClient {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
         
         const delay = Math.min(
-            ConnectionConfig.RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts),
-            ConnectionConfig.MAX_RECONNECT_DELAY
+            ConnectionConfig.CONNECTION.RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts),
+            ConnectionConfig.CONNECTION.MAX_RECONNECT_DELAY
         );
         
         this.reconnectTimeout = setTimeout(() => {

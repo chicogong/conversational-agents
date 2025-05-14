@@ -3,28 +3,52 @@ import AudioHandler from './audio-handler.js';
 import ChatManager from './chat-manager.js';
 
 /**
- * Main application class
+ * Main application class for conversational AI app
  */
 class ConversationalApp {
+    /**
+     * Initialize the application
+     */
     constructor() {
-        // DOM elements
-        this.startButton = document.getElementById('startButton');
-        this.stopButton = document.getElementById('stopButton');
-        this.statusElement = document.getElementById('status');
-        this.chatContainer = document.getElementById('chatContainer');
-        this.welcomeMessage = document.querySelector('.welcome-card');
+        this.initializeUI();
+        this.initializeManagers();
+        this.bindEventHandlers();
+        this.init();
+    }
+    
+    /**
+     * Initialize UI elements
+     */
+    initializeUI() {
+        this.elements = {
+            startButton: document.getElementById('startButton'),
+            stopButton: document.getElementById('stopButton'),
+            statusElement: document.getElementById('status'),
+            chatContainer: document.getElementById('chatContainer'),
+            welcomeMessage: document.querySelector('.welcome-card')
+        };
         
-        // Initialize managers
+        if (!this.elements.startButton || !this.elements.stopButton || 
+            !this.elements.statusElement || !this.elements.chatContainer) {
+            console.error('[Error] Required UI elements not found');
+        }
+    }
+    
+    /**
+     * Initialize manager objects
+     */
+    initializeManagers() {
         this.chatManager = new ChatManager('chatContainer');
         this.webSocketClient = null;
         this.audioHandler = null;
-        
-        // Bind event handlers
-        this.startButton.addEventListener('click', () => this.startConversation());
-        this.stopButton.addEventListener('click', () => this.stopConversation());
-        
-        // Initialize the app
-        this.init();
+    }
+    
+    /**
+     * Bind event handlers
+     */
+    bindEventHandlers() {
+        this.elements.startButton.addEventListener('click', () => this.startConversation());
+        this.elements.stopButton.addEventListener('click', () => this.stopConversation());
     }
     
     /**
@@ -62,9 +86,7 @@ class ConversationalApp {
                 this.disableButtons();
             },
             onAudioData: (data) => {
-                if (this.audioHandler) {
-                    this.audioHandler.addToAudioQueue(data);
-                }
+                if (this.audioHandler) this.audioHandler.addToAudioQueue(data);
             },
             onTranscription: (text) => {
                 this.hideWelcomeMessage();
@@ -75,14 +97,10 @@ class ConversationalApp {
                 this.chatManager.handlePartialTranscription(text);
             },
             onAIResponse: (text) => {
-                this.chatManager.hideTypingIndicator();
                 this.chatManager.handleAIResponse(text);
             },
             onInterrupt: () => {
-                if (this.audioHandler) {
-                    this.audioHandler.handleInterruption();
-                }
-                this.chatManager.hideTypingIndicator();
+                if (this.audioHandler) this.audioHandler.handleInterruption();
                 this.updateStatusWithIndicator('正在聆听...');
             },
             onServerError: (error) => {
@@ -98,29 +116,23 @@ class ConversationalApp {
     }
     
     /**
-     * Hide welcome message when conversation starts
-     */
-    hideWelcomeMessage() {
-        if (this.welcomeMessage && this.welcomeMessage.parentNode) {
-            this.welcomeMessage.style.display = 'none';
-        }
-    }
-    
-    /**
-     * Start streaming conversation
+     * Start conversation with voice
      */
     async startConversation() {
         try {
+            // Ensure connection is active
             if (!this.webSocketClient || !this.webSocketClient.isConnected()) {
                 this.updateStatus('重新连接中...');
                 await this.initWebSocket();
             }
             
+            // Start audio streaming
             await this.audioHandler.startStreamingConversation();
-            this.startButton.disabled = true;
-            this.stopButton.disabled = false;
+            
+            // Update UI
+            this.elements.startButton.disabled = true;
+            this.elements.stopButton.disabled = false;
             this.updateStatusWithIndicator('正在聆听...');
-            this.chatManager.showTypingIndicator();
             this.hideWelcomeMessage();
         } catch (error) {
             console.error('[Error] Failed to start conversation:', error);
@@ -129,47 +141,57 @@ class ConversationalApp {
     }
     
     /**
-     * Stop streaming conversation
+     * Stop conversation
      */
     stopConversation() {
         if (this.audioHandler) {
             this.audioHandler.stopStreamingConversation();
         }
         
-        this.startButton.disabled = false;
-        this.stopButton.disabled = true;
+        this.elements.startButton.disabled = false;
+        this.elements.stopButton.disabled = true;
         this.updateStatus('对话已结束');
-        this.chatManager.hideTypingIndicator();
+    }
+    
+    /**
+     * Hide welcome message when conversation starts
+     */
+    hideWelcomeMessage() {
+        if (this.elements.welcomeMessage && this.elements.welcomeMessage.parentNode) {
+            this.elements.welcomeMessage.style.display = 'none';
+        }
     }
     
     /**
      * Update status element
+     * @param {string} message - Status message
      */
     updateStatus(message) {
-        this.statusElement.textContent = message;
+        this.elements.statusElement.textContent = message;
     }
     
     /**
      * Update status with recording indicator
+     * @param {string} message - Status message
      */
     updateStatusWithIndicator(message) {
-        this.statusElement.innerHTML = `<span class="recording-indicator"></span>${message}`;
+        this.elements.statusElement.innerHTML = `<span class="recording-indicator"></span>${message}`;
     }
     
     /**
      * Enable start button
      */
     enableStartButton() {
-        this.startButton.disabled = false;
-        this.stopButton.disabled = true;
+        this.elements.startButton.disabled = false;
+        this.elements.stopButton.disabled = true;
     }
     
     /**
      * Disable all buttons
      */
     disableButtons() {
-        this.startButton.disabled = true;
-        this.stopButton.disabled = true;
+        this.elements.startButton.disabled = true;
+        this.elements.stopButton.disabled = true;
     }
 }
 

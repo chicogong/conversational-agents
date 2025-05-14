@@ -1,4 +1,17 @@
 /**
+ * Message types for WebSocket communication
+ * @enum {string}
+ */
+const MessageType = {
+    TRANSCRIPTION: 'transcription',
+    PARTIAL_TRANSCRIPTION: 'partialTranscription',
+    LLM_RESPONSE: 'llmResponse',
+    INTERRUPT: 'interrupt',
+    ERROR: 'error',
+    STATUS: 'status'
+};
+
+/**
  * Signal handler for processing WebSocket messages
  */
 class SignalHandler {
@@ -21,7 +34,7 @@ class SignalHandler {
      * @returns {void}
      */
     processMessage(event) {
-        // Check if the message is binary data (audio)
+        // Handle binary data (audio)
         if (event.data instanceof Blob) {
             if (this.handlers.onAudioData) {
                 this.handlers.onAudioData(event.data);
@@ -32,57 +45,60 @@ class SignalHandler {
         // Handle JSON messages
         try {
             const data = JSON.parse(event.data);
-            
-            // Determine message type from the data structure
-            let messageType = this._getMessageType(data);
-            
-            // Get payload (either from payload field or legacy field)
+            const messageType = this._getMessageType(data);
             const payload = this._getPayload(data, messageType);
             
-            // Process based on message type
-            switch (messageType) {
-                case 'transcription':
-                    if (this.handlers.onTranscription) {
-                        this.handlers.onTranscription(payload);
-                    }
-                    break;
-                
-                case 'partialTranscription':
-                    if (this.handlers.onPartialTranscription) {
-                        this.handlers.onPartialTranscription(payload);
-                    }
-                    break;
-                
-                case 'llmResponse':
-                    if (this.handlers.onAIResponse) {
-                        this.handlers.onAIResponse(payload);
-                    }
-                    break;
-                
-                case 'interrupt':
-                    if (this.handlers.onInterrupt) {
-                        this.handlers.onInterrupt();
-                    }
-                    break;
-                
-                case 'error':
-                    if (this.handlers.onServerError) {
-                        this.handlers.onServerError(payload);
-                    }
-                    break;
-                
-                case 'status':
-                    // Handle status messages
-                    console.log(`[Status] ${data.message || 'Server status update'}`);
-                    break;
-                    
-                default:
-                    // Unknown message type
-                    console.log('[Info] Received unknown message type:', data);
-                    break;
-            }
+            this._dispatchMessage(messageType, payload);
         } catch (error) {
             console.error('[Error] Failed to parse server message:', error);
+        }
+    }
+
+    /**
+     * Dispatch message to appropriate handler
+     * @param {string} type - Message type
+     * @param {*} payload - Message payload
+     * @private
+     */
+    _dispatchMessage(type, payload) {
+        switch (type) {
+            case MessageType.TRANSCRIPTION:
+                if (this.handlers.onTranscription) {
+                    this.handlers.onTranscription(payload);
+                }
+                break;
+                
+            case MessageType.PARTIAL_TRANSCRIPTION:
+                if (this.handlers.onPartialTranscription) {
+                    this.handlers.onPartialTranscription(payload);
+                }
+                break;
+                
+            case MessageType.LLM_RESPONSE:
+                if (this.handlers.onAIResponse) {
+                    this.handlers.onAIResponse(payload);
+                }
+                break;
+                
+            case MessageType.INTERRUPT:
+                if (this.handlers.onInterrupt) {
+                    this.handlers.onInterrupt();
+                }
+                break;
+                
+            case MessageType.ERROR:
+                if (this.handlers.onServerError) {
+                    this.handlers.onServerError(payload);
+                }
+                break;
+                
+            case MessageType.STATUS:
+                console.log(`[Status] ${payload || 'Server status update'}`);
+                break;
+                
+            default:
+                console.log('[Info] Received unknown message type:', type);
+                break;
         }
     }
 
@@ -97,12 +113,12 @@ class SignalHandler {
         if (data.type) return data.type;
         
         // For backward compatibility, determine type from properties
-        if (data.transcription) return 'transcription';
-        if (data.partialTranscription) return 'partialTranscription';
-        if (data.llmResponse) return 'llmResponse';
-        if (data.interrupt) return 'interrupt';
-        if (data.error) return 'error';
-        if (data.status) return 'status';
+        if (data.transcription) return MessageType.TRANSCRIPTION;
+        if (data.partialTranscription) return MessageType.PARTIAL_TRANSCRIPTION;
+        if (data.llmResponse) return MessageType.LLM_RESPONSE;
+        if (data.interrupt) return MessageType.INTERRUPT;
+        if (data.error) return MessageType.ERROR;
+        if (data.status) return MessageType.STATUS;
         
         return 'unknown';
     }
@@ -120,11 +136,11 @@ class SignalHandler {
         
         // Legacy format - extract from type-specific field
         switch (type) {
-            case 'transcription': return data.transcription;
-            case 'partialTranscription': return data.partialTranscription;
-            case 'llmResponse': return data.llmResponse;
-            case 'error': return data.error;
-            case 'status': return data.status;
+            case MessageType.TRANSCRIPTION: return data.transcription;
+            case MessageType.PARTIAL_TRANSCRIPTION: return data.partialTranscription;
+            case MessageType.LLM_RESPONSE: return data.llmResponse;
+            case MessageType.ERROR: return data.error;
+            case MessageType.STATUS: return data.status;
             default: return null;
         }
     }

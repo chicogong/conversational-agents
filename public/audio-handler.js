@@ -1,21 +1,29 @@
+import ConnectionConfig from './connection-config.js';
+
 /**
  * Audio streaming and processing module for conversational AI
  */
 class AudioHandler {
+    /**
+     * @param {WebSocket} websocket - WebSocket connection to send audio data
+     */
     constructor(websocket) {
         this.websocket = websocket;
         this.audioContext = null;
-        this.mediaRecorder = null;
-        this.audioQueue = [];
-        this.isPlaying = false;
-        this.currentSource = null;
+        this.mediaStream = null;
         this.processorNode = null;
         this.audioSendInterval = null;
         this.audioBuffer = new Float32Array(0);
+        
+        // Audio playback
+        this.audioQueue = [];
+        this.isPlaying = false;
+        this.currentSource = null;
     }
 
     /**
-     * Start streaming audio for conversation
+     * Start capturing and streaming audio
+     * @returns {Promise<boolean>} Success status
      */
     async startStreamingConversation() {
         try {
@@ -23,65 +31,71 @@ class AudioHandler {
                 throw new Error('WebSocket not connected');
             }
             
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            // Request microphone access
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({ 
                 audio: {
                     sampleRate: 48000,
-                    channelCount: 1,
+                    channelCount: ConnectionConfig.AUDIO.CHANNELS,
                     echoCancellation: true,
                     noiseSuppression: true
                 }
             });
             
-            this.audioContext = new AudioContext();
-            const source = this.audioContext.createMediaStreamSource(stream);
+            // Initialize audio context
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = this.audioContext.createMediaStreamSource(this.mediaStream);
             
-            // Target sample rate for processing
-            const destinationSampleRate = 16000;
-            const sourceSampleRate = this.audioContext.sampleRate;
-            
-            // Create processor
-            this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+            // Create processor node
+            this.processorNode = this.audioContext.createScriptProcessor(
+                ConnectionConfig.AUDIO.BUFFER_SIZE, 
+                ConnectionConfig.AUDIO.CHANNELS, 
+                ConnectionConfig.AUDIO.CHANNELS
+            );
             
             // Connect audio processing chain
             source.connect(this.processorNode);
             this.processorNode.connect(this.audioContext.destination);
             
             // Process audio data
-            this.processorNode.onaudioprocess = (e) => {
-                const inputData = e.inputBuffer.getChannelData(0);
-                
-                // Collect all audio data
-                const newBuffer = new Float32Array(this.audioBuffer.length + inputData.length);
-                newBuffer.set(this.audioBuffer);
-                newBuffer.set(inputData, this.audioBuffer.length);
-                this.audioBuffer = newBuffer;
-            };
+            this.processorNode.onaudioprocess = this._handleAudioProcess.bind(this);
             
             // Periodically send audio data
-            this.audioSendInterval = setInterval(() => {
-                this._processAndSendAudioData(destinationSampleRate, sourceSampleRate);
-            }, 100);
-            
-            // Save references for later cleanup
-            this.mediaRecorder = {
-                stream,
-                source,
-                stop: () => this.stopStreamingConversation()
-            };
+            this.audioSendInterval = setInterval(
+                () => this._processAndSendAudioData(), 
+                ConnectionConfig.AUDIO.PROCESS_INTERVAL
+            );
             
             return true;
         } catch (error) {
             console.error('[Error] Audio streaming error:', error);
+            this._cleanupAudioResources();
             throw error;
         }
+    }
+
+    /**
+     * Handle audio processing event
+     * @param {AudioProcessingEvent} e - Audio processing event
+     * @private
+     */
+    _handleAudioProcess(e) {
+        const inputData = e.inputBuffer.getChannelData(0);
+        
+        // Collect all audio data
+        const newBuffer = new Float32Array(this.audioBuffer.length + inputData.length);
+        newBuffer.set(this.audioBuffer);
+        newBuffer.set(inputData, this.audioBuffer.length);
+        this.audioBuffer = newBuffer;
     }
 
     /**
      * Process and send audio data to the server
      * @private
      */
-    _processAndSendAudioData(destinationSampleRate, sourceSampleRate) {
-        if (this.audioBuffer.length === 0 || !this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+    _processAndSendAudioData() {
+        if (this.audioBuffer.length === 0 || 
+            !this.websocket || 
+            this.websocket.readyState !== WebSocket.OPEN) {
             return;
         }
         
@@ -89,6 +103,8 @@ class AudioHandler {
         const rawLength = this.audioBuffer.length;
         
         // Resample audio data
+        const sourceSampleRate = this.audioContext.sampleRate;
+        const destinationSampleRate = ConnectionConfig.AUDIO.SAMPLE_RATE;
         const resampleRatio = destinationSampleRate / sourceSampleRate;
         const resampledLength = Math.round(rawLength * resampleRatio);
         const resampledData = new Float32Array(resampledLength);
@@ -115,6 +131,14 @@ class AudioHandler {
      * Stop streaming conversation
      */
     stopStreamingConversation() {
+        this._cleanupAudioResources();
+    }
+    
+    /**
+     * Clean up audio resources
+     * @private
+     */
+    _cleanupAudioResources() {
         if (this.audioSendInterval) {
             clearInterval(this.audioSendInterval);
             this.audioSendInterval = null;
@@ -125,16 +149,9 @@ class AudioHandler {
             this.processorNode = null;
         }
         
-        if (this.mediaRecorder) {
-            if (this.mediaRecorder.source) {
-                this.mediaRecorder.source.disconnect();
-            }
-            
-            if (this.mediaRecorder.stream) {
-                this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            }
-            
-            this.mediaRecorder = null;
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream = null;
         }
         
         if (this.audioContext) {
@@ -147,6 +164,7 @@ class AudioHandler {
 
     /**
      * Add audio data to the playback queue
+     * @param {Blob} audioData - Audio data to play
      */
     addToAudioQueue(audioData) {
         this.audioQueue.push(audioData);
@@ -156,27 +174,37 @@ class AudioHandler {
     }
 
     /**
+     * Handle user interruption during conversation
+     */
+    handleInterruption() {
+        if (this.currentSource) {
+            this.currentSource.stop();
+            this.currentSource = null;
+        }
+        this.audioQueue = [];
+        this.isPlaying = false;
+    }
+
+    /**
      * Convert PCM data to WAV format
      * @param {ArrayBuffer} pcmBuffer - Raw PCM audio data
-     * @param {number} sampleRate - Sample rate of the audio (default: 16000)
+     * @param {number} sampleRate - Sample rate of the audio
      * @returns {Blob} - WAV formatted audio blob
      */
-    convertPCMToWAV(pcmBuffer, sampleRate = 16000) {
-        // Helper function to write a string to a DataView
+    convertPCMToWAV(pcmBuffer, sampleRate = ConnectionConfig.AUDIO.SAMPLE_RATE) {
         const writeString = (view, offset, string) => {
             for (let i = 0; i < string.length; i++) {
                 view.setUint8(offset + i, string.charCodeAt(i));
             }
         };
         
-        // Create WAV header
         const createWavHeader = (dataLength) => {
             const buffer = new ArrayBuffer(44);
             const view = new DataView(buffer);
             
             // RIFF identifier
             writeString(view, 0, 'RIFF');
-            // File length (data length + 36)
+            // File length
             view.setUint32(4, 36 + dataLength, true);
             // WAVE identifier
             writeString(view, 8, 'WAVE');
@@ -187,12 +215,12 @@ class AudioHandler {
             // Sample format (1 is PCM)
             view.setUint16(20, 1, true);
             // Channels (mono = 1)
-            view.setUint16(22, 1, true);
+            view.setUint16(22, ConnectionConfig.AUDIO.CHANNELS, true);
             // Sample rate
             view.setUint32(24, sampleRate, true);
-            // Byte rate (sample rate * block align)
+            // Byte rate
             view.setUint32(28, sampleRate * 2, true);
-            // Block align (channels * bytes per sample)
+            // Block align
             view.setUint16(32, 2, true);
             // Bits per sample
             view.setUint16(34, 16, true);
@@ -237,56 +265,32 @@ class AudioHandler {
             const response = await fetch(audioUrl);
             const arrayBuffer = await response.arrayBuffer();
             
-            // Try to detect if this is raw PCM data based on MIME type or content inspection
+            // Determine audio format and prepare for playback
             let audioToPlay;
             if (audioData.type === 'audio/wav' || audioData.type === 'audio/mp3') {
-                // Already in a playable format
                 audioToPlay = arrayBuffer;
             } else {
-                // Convert from PCM to WAV if we suspect it's raw PCM
-                // We're assuming 16kHz 16-bit mono PCM
-                const wavBlob = this.convertPCMToWAV(arrayBuffer, 16000);
+                const wavBlob = this.convertPCMToWAV(arrayBuffer);
                 audioToPlay = await wavBlob.arrayBuffer();
             }
             
-            // Decode and play the audio
+            // Decode and play audio
             const audioBuffer = await this.audioContext.decodeAudioData(audioToPlay);
+            this.currentSource = this.audioContext.createBufferSource();
+            this.currentSource.buffer = audioBuffer;
+            this.currentSource.connect(this.audioContext.destination);
             
-            const source = this.audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(this.audioContext.destination);
-            
-            this.currentSource = source;
-            
-            source.onended = () => {
-                URL.revokeObjectURL(audioUrl);
+            this.currentSource.onended = () => {
                 this.currentSource = null;
+                URL.revokeObjectURL(audioUrl);
                 this.playNextAudio();
             };
             
-            source.start(0);
+            this.currentSource.start(0);
         } catch (error) {
             console.error('[Error] Audio playback error:', error);
-            this.currentSource = null;
-            this.playNextAudio();
+            this.playNextAudio(); // Try next audio in queue
         }
-    }
-
-    /**
-     * Handle interruption signals
-     */
-    handleInterruption() {
-        if (this.currentSource) {
-            try {
-                this.currentSource.stop(0);
-            } catch(e) {
-                console.error('[Error] Failed to stop audio source:', e);
-            }
-            this.currentSource = null;
-        }
-        
-        this.audioQueue.length = 0;
-        this.isPlaying = false;
     }
 }
 
